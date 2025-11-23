@@ -1,0 +1,4 @@
+Metric,Value
+Total Backlog Finished Goods,"{'Shift 1': '745', 'Shift 1 B': '2,584', 'Shift 2': '2,493', 'Shift 2 A': '2,633', 'Shift 3': '3,483', 'Shift 3 C': '3,483', 'Shift 4': '5,288', 'Shift 4 B': '6,821', 'Shift 5': '6,611', 'Shift 5 A': '7,961', 'Shift 6': '7,679', 'Shift 6 C': '7,978'}"
+Production Output Finished Goods,"{'Shift 1': '4,900', 'Shift 1 B': '6,952', 'Shift 2': '8,100', 'Shift 2 A': '6,123', 'Shift 3': '8,100', 'Shift 3 C': '6,897', 'Shift 4': '8,100', 'Shift 4 B': '7,956', 'Shift 5': '7,300', 'Shift 5 A': '6,769', 'Shift 6': '8,100', 'Shift 6 C': '3,395'}"
+Production Output Connectors,"{'Shift 1': '6,100', 'Shift 1 B': '8,083', 'Shift 2': '10,900', 'Shift 2 A': '7,100', 'Shift 3': '10,900', 'Shift 3 C': '9,212', 'Shift 4': '10,900', 'Shift 4 B': '9,560', 'Shift 5': '9,300', 'Shift 5 A': '9,475', 'Shift 6': '10,900', 'Shift 6 C': '5,045'}"
