@@ -27,7 +27,7 @@ st.markdown("""
         background-color: #0e1117;
     }
     .stMetric {
-        background-color: #f0f2f6;
+        background-color: #333539;
         padding: 15px;
         border-radius: 10px;
     }
