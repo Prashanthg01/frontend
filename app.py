@@ -162,6 +162,19 @@ def post_data(endpoint, data=None):
         st.error(f"Connection error: {str(e)}")
         return None
 
+def post_files(endpoint, files_dict):
+    """Post files to Django API"""
+    try:
+        response = requests.post(f"{API_BASE_URL}/{endpoint}/", files=files_dict)
+        if response.status_code in [200, 201]:
+            return response.json()
+        else:
+            st.error(f"Error posting data: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Connection error: {str(e)}")
+        return None
+
 def generate_timeline_html(df_schedule, start_time, end_time, time_interval_minutes=30):
     """Generate custom timeline HTML with times on Y-axis and machines on X-axis"""
     if df_schedule.empty:
@@ -1148,18 +1161,62 @@ elif page == "📅 Schedule Management":
     
     # Sidebar
     st.sidebar.title("⚙️ Controls")
+
+    st.sidebar.subheader("📁 Data Initialization")
     
-    col1, col2 = st.sidebar.columns(2)
+    with st.sidebar.expander("📤 Upload CSV Files", expanded=True):
+        st.markdown("**Upload your data files:**")
+        
+        frontpage_file = st.file_uploader(
+            "Frontpage.csv",
+            type=['csv'],
+            help="Upload the frontpage CSV containing product demand data",
+            key="frontpage"
+        )
+        
+        process_file = st.file_uploader(
+            "Process.csv",
+            type=['csv'],
+            help="Upload the process CSV containing routing and machine data",
+            key="process"
+        )
+        
+        if st.button("🔄 Initialize Database", use_container_width=True):
+            if frontpage_file is None or process_file is None:
+                st.error("⚠️ Please upload both CSV files before initializing!")
+            else:
+                with st.spinner("Initializing database with uploaded files..."):
+                    # Prepare files for upload
+                    files = {
+                        'frontpage': ('Frontpage.csv', frontpage_file.getvalue(), 'text/csv'),
+                        'process': ('Process.csv', process_file.getvalue(), 'text/csv')
+                    }
+                    
+                    result = post_files("initialize-data", files)
+                    
+                    if result:
+                        st.success(f"✅ {result['message']}")
+                        st.info(f"""
+                        **Created:**
+                        - {result['products_created']} Products
+                        - {result['machines_created']} Machines
+                        - {result['process_steps_created']} Process Steps
+                        """)
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to initialize database. Check file formats.")
+        
+        # Display uploaded file info
+        if frontpage_file:
+            st.success(f"✓ Frontpage: {frontpage_file.name}")
+        if process_file:
+            st.success(f"✓ Process: {process_file.name}")
+    
+    st.sidebar.markdown("---")
+    
+    col1, col2 = st.sidebar.columns([1, 1])
     
     with col1:
-        if st.button("🔄 Init Data", use_container_width=True):
-            with st.spinner("Initializing database..."):
-                result = post_data("initialize-data")
-                if result:
-                    st.success(f"✅ {result['message']}")
-                    st.rerun()
-    
-    with col2:
         if st.button("📅 Generate Schedule", use_container_width=True):
             with st.spinner("Generating schedule..."):
                 result = post_data("generate-schedule")
