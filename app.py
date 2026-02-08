@@ -8,6 +8,7 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import warnings
 import json
+import time
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -20,7 +21,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Enhanced Custom CSS
+# Enhanced Custom CSS (keeping your original styles)
 st.markdown("""
     <style>
     .main {
@@ -114,6 +115,31 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
     }
+    .progress-container {
+        background: #f0f2f6;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    .task-status {
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-weight: bold;
+        text-align: center;
+        margin: 10px 0;
+    }
+    .status-processing {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+    }
+    .status-success {
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        color: white;
+    }
+    .status-error {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -128,6 +154,10 @@ if 'filter_options' not in st.session_state:
     st.session_state.filter_options = None
 if 'filters_loaded' not in st.session_state:
     st.session_state.filters_loaded = False
+if 'async_task_id' not in st.session_state:
+    st.session_state.async_task_id = None
+if 'task_status' not in st.session_state:
+    st.session_state.task_status = None
 
 API_BASE_URL = st.sidebar.text_input(
     "API Base URL",
@@ -135,11 +165,12 @@ API_BASE_URL = st.sidebar.text_input(
     help="Enter your Django API base URL"
 )
 
-# Helper functions for Schedule Management
+# ==================== HELPER FUNCTIONS ====================
+
 def fetch_data(endpoint, params=None):
     """Fetch data from Django API"""
     try:
-        response = requests.get(f"{API_BASE_URL}/{endpoint}/", params=params)
+        response = requests.get(f"{API_BASE_URL}/{endpoint}/", params=params, timeout=30)
         if response.status_code == 200:
             return response.json()
         else:
@@ -152,21 +183,8 @@ def fetch_data(endpoint, params=None):
 def post_data(endpoint, data=None):
     """Post data to Django API"""
     try:
-        response = requests.post(f"{API_BASE_URL}/{endpoint}/", json=data)
-        if response.status_code in [200, 201]:
-            return response.json()
-        else:
-            st.error(f"Error posting data: {response.status_code}")
-            return None
-    except Exception as e:
-        st.error(f"Connection error: {str(e)}")
-        return None
-
-def post_files(endpoint, files_dict):
-    """Post files to Django API"""
-    try:
-        response = requests.post(f"{API_BASE_URL}/{endpoint}/", files=files_dict)
-        if response.status_code in [200, 201]:
+        response = requests.post(f"{API_BASE_URL}/{endpoint}/", json=data, timeout=60)
+        if response.status_code in [200, 201, 202]:
             return response.json()
         else:
             st.error(f"Error posting data: {response.status_code} - {response.text}")
@@ -174,6 +192,89 @@ def post_files(endpoint, files_dict):
     except Exception as e:
         st.error(f"Connection error: {str(e)}")
         return None
+
+def post_files(endpoint, files_dict, data_dict=None):
+    """Post files to Django API with optional form data"""
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/{endpoint}/",
+            files=files_dict,
+            data=data_dict,
+            timeout=120
+        )
+        if response.status_code in [200, 201, 202]:
+            return response.json()
+        else:
+            st.error(f"Error posting data: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Connection error: {str(e)}")
+        return None
+
+def check_task_status(task_id):
+    """Check the status of an async task"""
+    try:
+        response = requests.get(f"{API_BASE_URL}/task-status/{task_id}/", timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Error checking task status: {str(e)}")
+        return None
+
+def poll_task_until_complete(task_id, progress_bar, status_text, max_wait_seconds=300):
+    """
+    Poll task status until complete or timeout.
+    
+    Returns:
+        dict: Task result if successful, None otherwise
+    """
+    start_time = time.time()
+    
+    while time.time() - start_time < max_wait_seconds:
+        status_data = check_task_status(task_id)
+        
+        if status_data:
+            state = status_data.get('state')
+            progress = status_data.get('progress', 0)
+            status_msg = status_data.get('status', 'Processing...')
+            
+            # Update UI
+            progress_bar.progress(progress / 100.0)
+            status_text.text(f"📊 {status_msg} ({progress}%)")
+            
+            if state == 'SUCCESS':
+                return status_data.get('result')
+            elif state == 'FAILURE':
+                st.error(f"❌ Task failed: {status_data.get('error', 'Unknown error')}")
+                return None
+        
+        time.sleep(2)  # Poll every 2 seconds
+    
+    st.warning("⏱️ Task is taking longer than expected. Check back later.")
+    return None
+
+def display_async_progress(task_id, operation_name="Operation"):
+    """Display progress for an async task with live updates"""
+    st.markdown(f"""
+        <div class="progress-container">
+            <h4>⏳ {operation_name} in Progress</h4>
+            <p>Task ID: <code>{task_id}</code></p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    result = poll_task_until_complete(task_id, progress_bar, status_text)
+    
+    if result:
+        st.success(f"✅ {operation_name} completed successfully!")
+        return result
+    return None
+
+# ==================== VISUALIZATION FUNCTIONS ====================
 
 def generate_timeline_html(df_schedule, start_time, end_time, time_interval_minutes=30):
     """Generate custom timeline HTML with times on Y-axis and machines on X-axis"""
@@ -368,46 +469,6 @@ def generate_timeline_html(df_schedule, start_time, end_time, time_interval_minu
             .item-8 { background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); }
             .item-9 { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%); }
             .item-10 { background: linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%); }
-            .item-11 { background: linear-gradient(135deg, #fddb92 0%, #d1fdff 100%); }
-            .item-12 { background: linear-gradient(135deg, #9890e3 0%, #b1f4cf 100%); }
-            .item-13 { background: linear-gradient(135deg, #fad0c4 0%, #ffd1ff 100%); }
-            .item-14 { background: linear-gradient(135deg, #ff9a56 0%, #ff6a88 100%); }
-            .item-15 { background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); }
-            .item-16 { background: linear-gradient(135deg, #ff6e7f 0%, #bfe9ff 100%); }
-            .item-17 { background: linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%); }
-            .item-18 { background: linear-gradient(135deg, #f8b500 0%, #fceabb 100%); }
-            .item-19 { background: linear-gradient(135deg, #cfd9df 0%, #e2ebf0 100%); }
-            .item-20 { background: linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%); }
-            .item-21 { background: linear-gradient(135deg, #ff8177 0%, #ff867a 100%); }
-            .item-22 { background: linear-gradient(135deg, #4e54c8 0%, #8f94fb 100%); }
-            .item-23 { background: linear-gradient(135deg, #2193b0 0%, #6dd5ed 100%); }
-            .item-24 { background: linear-gradient(135deg, #b24592 0%, #f15f79 100%); }
-            .item-25 { background: linear-gradient(135deg, #4568dc 0%, #b06ab3 100%); }
-            .item-26 { background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); }
-            .item-27 { background: linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%); }
-            .item-28 { background: linear-gradient(135deg, #30cfd0 0%, #330867 100%); }
-            .item-29 { background: linear-gradient(135deg, #f77062 0%, #fe5196 100%); }
-            .item-30 { background: linear-gradient(135deg, #5ee7df 0%, #b490ca 100%); }
-            .item-31 { background: linear-gradient(135deg, #ff9966 0%, #ff5e62 100%); }
-            .item-32 { background: linear-gradient(135deg, #7f7fd5 0%, #86a8e7 100%); }
-            .item-33 { background: linear-gradient(135deg, #e1eec3 0%, #f05053 100%); }
-            .item-34 { background: linear-gradient(135deg, #c471ed 0%, #f64f59 100%); }
-            .item-35 { background: linear-gradient(135deg, #12c2e9 0%, #c471ed 100%); }
-            .item-36 { background: linear-gradient(135deg, #fbc7d4 0%, #9796f0 100%); }
-            .item-37 { background: linear-gradient(135deg, #cfd9df 0%, #e2ebf0 100%); }
-            .item-38 { background: linear-gradient(135deg, #ff758c 0%, #ff7eb3 100%); }
-            .item-39 { background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%); }
-            .item-40 { background: linear-gradient(135deg, #ff9966 0%, #ff5e62 100%); }
-            .item-41 { background: linear-gradient(135deg, #1fddff 0%, #ff4b1f 100%); }
-            .item-42 { background: linear-gradient(135deg, #3a1c71 0%, #d76d77 100%); }
-            .item-43 { background: linear-gradient(135deg, #0fd850 0%, #f9f047 100%); }
-            .item-44 { background: linear-gradient(135deg, #74ebd5 0%, #acb6e5 100%); }
-            .item-45 { background: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%); }
-            .item-46 { background: linear-gradient(135deg, #4ca1af 0%, #c4e0e5 100%); }
-            .item-47 { background: linear-gradient(135deg, #ff5f6d 0%, #ffc371 100%); }
-            .item-48 { background: linear-gradient(135deg, #36d1dc 0%, #5b86e5 100%); }
-            .item-49 { background: linear-gradient(135deg, #ee9ca7 0%, #ffdde1 100%); }
-            .item-50 { background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); }
             
             .legend {
                 display: flex;
@@ -447,17 +508,10 @@ def generate_timeline_html(df_schedule, start_time, end_time, time_interval_minu
     for machine in machines:
         html += f'<div class="machine-header">{machine}</div>'
     
-    html += '</div>'  # End machine header row
-    
-    # Timeline body - create grid with time slots as rows and machines as columns
+    html += '</div>'
     html += '<div class="timeline-body">'
     
-    # Create a mapping of machine to column index for positioning
-    machine_to_col = {machine: idx for idx, machine in enumerate(machines)}
-    
-    # For each time slot
     for slot_idx, time_slot in enumerate(time_slots):
-        # Time label cell
         time_str = time_slot.strftime('%H:%M')
         date_str = time_slot.strftime('%m/%d')
         html += f'''
@@ -467,43 +521,34 @@ def generate_timeline_html(df_schedule, start_time, end_time, time_interval_minu
         </div>
         '''
         
-        # Machine cells for this time slot
         slot_start = time_slot
         slot_end = time_slot + timedelta(minutes=time_interval_minutes)
         
         for machine in machines:
             html += '<div class="machine-cell">'
-            
-            # Find schedules for this machine that overlap with this time slot
             machine_data = df[df['machine_name'] == machine]
             
             for _, row in machine_data.iterrows():
                 sched_start = row['start_time']
                 sched_end = row['end_time']
                 
-                # Check if schedule overlaps with this time slot
                 if sched_start < slot_end and sched_end > slot_start:
-                    # Calculate vertical position and height
-                    # Determine where in this slot the schedule starts and ends
-                    display_start = max(sched_start, slot_start)
-                    display_end = min(sched_end, slot_end)
-                    
-                    # Calculate percentage within the slot
-                    slot_duration = (slot_end - slot_start).total_seconds()
-                    offset_seconds = (display_start - slot_start).total_seconds()
-                    duration_seconds = (display_end - display_start).total_seconds()
-                    
-                    top_percent = (offset_seconds / slot_duration) * 100
-                    height_percent = (duration_seconds / slot_duration) * 100
-                    
-                    # Only show if this is the first slot where this schedule appears
                     if slot_start <= sched_start < slot_end:
-                        # Calculate total height across all slots
+                        display_start = max(sched_start, slot_start)
+                        display_end = min(sched_end, slot_end)
+                        
+                        slot_duration = (slot_end - slot_start).total_seconds()
+                        offset_seconds = (display_start - slot_start).total_seconds()
+                        duration_seconds = (display_end - display_start).total_seconds()
+                        
+                        top_percent = (offset_seconds / slot_duration) * 100
+                        height_percent = (duration_seconds / slot_duration) * 100
+                        
                         total_duration = (sched_end - sched_start).total_seconds()
                         num_slots_span = total_duration / (time_interval_minutes * 60)
                         total_height_percent = height_percent * num_slots_span
                         
-                        item_class = f"item-{row['product_item']}"
+                        item_class = f"item-{row['product_item'] % 10 + 1}"
                         batch_id = row['batch_id']
                         step_num = row['step_number']
                         step_name = str(row['step_name'])[:30]
@@ -517,11 +562,9 @@ def generate_timeline_html(df_schedule, start_time, end_time, time_interval_minu
                         </div>
                         '''
             
-            html += '</div>'  # End machine cell
+            html += '</div>'
     
-    html += '</div>'  # End timeline body
-    html += '</div>'  # End timeline grid
-    html += '</div>'  # End timeline container
+    html += '</div></div></div>'
     
     # Add legend
     html += '<div class="legend">'
@@ -531,14 +574,13 @@ def generate_timeline_html(df_schedule, start_time, end_time, time_interval_minu
         short_desc = item_desc[:40] + "..." if len(item_desc) > 40 else item_desc
         html += f'''
         <div class="legend-item">
-            <div class="legend-color item-{item}"></div>
+            <div class="legend-color item-{item % 10 + 1}"></div>
             <span><strong>Item {item}:</strong> {short_desc}</span>
         </div>
         '''
     html += '</div>'
     
     html += '</body></html>'
-    
     return html
 
 def create_gantt_chart(df_schedule):
@@ -602,7 +644,6 @@ def create_machine_utilization_chart(machine_stats):
     
     return fig
 
-
 def create_batch_comparison_chart(batch_analysis):
     """Create comparison chart for batch optimization"""
     df = pd.DataFrame(batch_analysis)
@@ -638,7 +679,8 @@ def create_batch_comparison_chart(batch_analysis):
     
     return fig
 
-# Main Navigation
+# ==================== MAIN NAVIGATION ====================
+
 st.sidebar.title("🏭 Production Suite")
 page = st.sidebar.radio(
     "Navigate",
@@ -648,7 +690,7 @@ page = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
-# PAGE 1: Production Analytics
+# ==================== PAGE 1: Production Analytics ====================
 if page == "📊 Production Analytics":
     st.title("📊 Production Analytics Dashboard")
     
@@ -665,7 +707,7 @@ if page == "📊 Production Analytics":
                     uploaded_file.seek(0)
                     try:
                         response = requests.post(
-                            "http://127.0.0.1:8000/api/get-filter-options/",
+                            f"{API_BASE_URL}/csv-filter-options/",
                             files={"file": uploaded_file}
                         )
                         if response.status_code == 200:
@@ -750,7 +792,7 @@ if page == "📊 Production Analytics":
                     }
                     
                     response = requests.post(
-                        "http://127.0.0.1:8000/api/process-csv/",
+                        f"{API_BASE_URL}/process-csv/",
                         data=filter_data,
                         files={"file": uploaded_file}
                     )
@@ -1154,10 +1196,10 @@ if page == "📊 Production Analytics":
         - 📥 Export capabilities for reports
         """)
 
-# PAGE 2: Schedule Management
+# ==================== PAGE 2: Schedule Management (WITH ASYNC SUPPORT) ====================
 elif page == "📅 Schedule Management":
     st.markdown('<div class="main-header">🏭 Production Schedule Dashboard</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Optimized Machine Time Allocation</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Optimized Machine Time Allocation (Now with Async Support!)</div>', unsafe_allow_html=True)
     
     # Sidebar
     st.sidebar.title("⚙️ Controls")
@@ -1181,30 +1223,54 @@ elif page == "📅 Schedule Management":
             key="process"
         )
         
+        # Async mode toggle for initialization
+        init_async_mode = st.checkbox(
+            "🚀 Use Async Mode (Recommended for large datasets)",
+            value=True,
+            key="init_async",
+            help="Process in background - no waiting!"
+        )
+        
         if st.button("🔄 Initialize Database", use_container_width=True):
             if frontpage_file is None or process_file is None:
                 st.error("⚠️ Please upload both CSV files before initializing!")
             else:
-                with st.spinner("Initializing database with uploaded files..."):
-                    # Prepare files for upload
-                    files = {
-                        'frontpage': ('Frontpage.csv', frontpage_file.getvalue(), 'text/csv'),
-                        'process': ('Process.csv', process_file.getvalue(), 'text/csv')
-                    }
-                    
-                    result = post_files("initialize-data", files)
-                    
-                    if result:
+                files = {
+                    'frontpage': ('Frontpage.csv', frontpage_file.getvalue(), 'text/csv'),
+                    'process': ('Process.csv', process_file.getvalue(), 'text/csv')
+                }
+                data_dict = {
+                    'async_mode': 'true' if init_async_mode else 'false'
+                }
+                
+                result = post_files("initialize-data", files, data_dict)
+                
+                if result:
+                    if init_async_mode and 'task_id' in result:
+                        st.session_state.async_task_id = result['task_id']
+                        st.success(f"✅ Initialization started! Task ID: {result['task_id']}")
+                        
+                        # Show progress
+                        init_result = display_async_progress(result['task_id'], "Database Initialization")
+                        
+                        if init_result:
+                            st.success(f"✅ {init_result['message']}")
+                            st.info(f"""
+                            **Created:**
+                            - {init_result['products_created']} Products
+                            - {init_result['machines_created']} Machines
+                            - {init_result['process_steps_created']} Process Steps
+                            """)
+                            st.rerun()
+                    else:
                         st.success(f"✅ {result['message']}")
                         st.info(f"""
                         **Created:**
-                        - {result['products_created']} Products
-                        - {result['machines_created']} Machines
-                        - {result['process_steps_created']} Process Steps
+                        - {result.get('products_created', 0)} Products
+                        - {result.get('machines_created', 0)} Machines
+                        - {result.get('process_steps_created', 0)} Process Steps
                         """)
                         st.rerun()
-                    else:
-                        st.error("❌ Failed to initialize database. Check file formats.")
         
         # Display uploaded file info
         if frontpage_file:
@@ -1214,16 +1280,70 @@ elif page == "📅 Schedule Management":
     
     st.sidebar.markdown("---")
     
-    col1, col2 = st.sidebar.columns([1, 1])
+    # Schedule Generation with Async Support
+    st.sidebar.subheader("📅 Schedule Generation")
     
-    with col1:
-        if st.button("📅 Generate Schedule", use_container_width=True):
-            with st.spinner("Generating schedule..."):
-                result = post_data("generate-schedule")
-                if result:
+    with st.sidebar.expander("⚙️ Generation Settings", expanded=True):
+        # Async mode toggle
+        # schedule_async_mode = st.checkbox(
+        #     "🚀 Use Async Mode",
+        #     value=True,
+        #     key="schedule_async",
+        #     help="Generate schedule in background - instant response!"
+        # )
+        schedule_async_mode = True
+        # Advanced settings
+        # use_pulp_scheduler = st.selectbox(
+        #     "Scheduling Method",
+        #     ["Auto (Recommended)", "Force PuLP Optimizer", "Force Greedy Heuristic"],
+        #     help="Auto selects best method based on problem size"
+        # )
+        use_pulp_scheduler = "Force PuLP Optimizer"
+        # time_limit = st.slider(
+        #     "PuLP Timeout (seconds)",
+        #     min_value=10,
+        #     max_value=300,
+        #     value=60,
+        #     help="Maximum time for PuLP solver"
+        # )
+        time_limit = 120
+        if st.button("📅 Generate Schedule", use_container_width=True, type="primary"):
+            # Map selection to API value
+            scheduler_map = {
+                "Auto (Recommended)": None,
+                "Force PuLP Optimizer": True,
+                "Force Greedy Heuristic": False
+            }
+            
+            schedule_data = {
+                "async_mode": schedule_async_mode,
+                "use_pulp_scheduler": scheduler_map[use_pulp_scheduler],
+                "time_limit": time_limit
+            }
+            
+            result = post_data("generate-schedule", schedule_data)
+            
+            if result:
+                if schedule_async_mode and 'task_id' in result:
+                    st.session_state.async_task_id = result['task_id']
+                    st.success(f"✅ Schedule generation started! Task ID: {result['task_id']}")
+                    
+                    # Show progress
+                    schedule_result = display_async_progress(result['task_id'], "Schedule Generation")
+                    
+                    if schedule_result:
+                        st.success(f"✅ {schedule_result['message']}")
+                        st.info(f"""
+                        **Schedule Info:**
+                        - Method: {schedule_result.get('scheduling_method', 'N/A')}
+                        - Operations: {schedule_result.get('schedule_count', 0)}
+                        - Products Optimized: {schedule_result.get('batch_optimization', {}).get('products_optimized', 0)}
+                        """)
+                        st.rerun()
+                else:
                     st.success(f"✅ {result['message']}")
                     st.rerun()
-    
+
     st.sidebar.markdown("---")
     
     # Batch Size Optimization Section
@@ -1259,19 +1379,37 @@ elif page == "📅 Schedule Management":
             help="Maximum size per batch"
         )
         
+        # Async toggle for batch preview
+        batch_async_mode = st.checkbox(
+            "🚀 Use Async for Preview",
+            value=False,
+            key="batch_async",
+            help="Use async mode for large datasets (100+ products)"
+        )
+        
         if st.button("🔍 Preview Optimization", use_container_width=True):
-            with st.spinner("Calculating optimal batch sizes..."):
-                params = {
-                    'max_num_batches': max_num_batches,
-                    'min_batch_size': min_batch_size,
-                    'max_batch_size': max_batch_size
-                }
-                batch_preview = fetch_data("batch-optimization-preview", params)
-                
-                if batch_preview:
+            params = {
+                'max_num_batches': max_num_batches,
+                'min_batch_size': min_batch_size,
+                'max_batch_size': max_batch_size,
+                'async_mode': 'true' if batch_async_mode else 'false'
+            }
+            
+            batch_preview = fetch_data("batch-optimization-preview", params)
+            
+            if batch_preview:
+                if batch_async_mode and 'task_id' in batch_preview:
+                    st.success(f"✅ Batch optimization started! Task ID: {batch_preview['task_id']}")
+                    
+                    # Show progress
+                    batch_result = display_async_progress(batch_preview['task_id'], "Batch Optimization Preview")
+                    
+                    if batch_result:
+                        st.session_state['batch_preview'] = batch_result
+                        st.success("✅ Optimization preview ready!")
+                else:
                     st.session_state['batch_preview'] = batch_preview
                     st.success("✅ Optimization preview ready!")
-    
 
     # Filters
     st.sidebar.subheader("🔍 Filters")
@@ -1395,8 +1533,8 @@ elif page == "📅 Schedule Management":
         - Min Batch Size: {batch_data['parameters']['min_batch_size']} units
         - Max Batch Size: {batch_data['parameters']['max_batch_size']} units
         
-        💡 The optimization algorithm calculates an **ideal batch size** based on demand and divides it by the max number of batches. 
-        It then adjusts to stay within min/max constraints while minimizing total batches needed.
+        💡 The optimization algorithm uses **PuLP Linear Programming** to minimize the number of batches 
+        while respecting min/max constraints and ensuring full demand coverage.
         """)
         
         st.markdown("---")
@@ -1408,13 +1546,9 @@ elif page == "📅 Schedule Management":
     if selected_product_sched != 'All':
         product_item = int(selected_product_sched.split(':')[0].replace('Item ', ''))
         params['product'] = product_item
-    # if start_date:
-    #     params['start_date'] = start_date.isoformat()
-    # if end_date:
-    #     params['end_date'] = end_date.isoformat()
     
-    schedule_data = fetch_data("get-schedule", params)
-    kpi_data = fetch_data("get-kpis")
+    schedule_data = fetch_data("schedule", params)
+    kpi_data = fetch_data("kpis")
     
     if not schedule_data or not schedule_data.get('schedules'):
         st.warning("⚠️ No schedule data available. Please initialize data and generate schedule.")
@@ -1436,7 +1570,8 @@ elif page == "📅 Schedule Management":
                 """, unsafe_allow_html=True)
             
             with col2:
-                avg_utilization = sum([m['utilization'] for m in kpi_data.get('machine_utilization', [])]) / max(len(kpi_data.get('machine_utilization', [])), 1)
+                machine_util = kpi_data.get('machine_utilization', [])
+                avg_utilization = sum([m['utilization'] for m in machine_util]) / max(len(machine_util), 1)
                 st.markdown(f"""
                     <div class="kpi-card">
                         <div class="kpi-value">{avg_utilization:.1f}%</div>
@@ -1535,11 +1670,12 @@ elif page == "📅 Schedule Management":
         st.markdown("---")
         st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Total schedules: {len(df_schedule)}")
 
+# ==================== PAGE 3: Buffer Optimization ====================
 elif page == "📊 Buffer Optimization":
     st.header("Buffer Optimization Analysis")
     
     # Safety factor input
-    col1, col2 = st.columns([1, 3])
+    col1, col2, col3 = st.columns([1, 2, 2])
     with col1:
         safety_factor = st.number_input(
             "Safety Factor",
@@ -1551,16 +1687,29 @@ elif page == "📊 Buffer Optimization":
         )
     
     with col2:
+        total_budget = st.number_input(
+            "Total Buffer Budget (optional)",
+            min_value=0.0,
+            value=0.0,
+            step=100.0,
+            help="If set > 0, uses PuLP to optimally allocate this budget across machines"
+        )
+    
+    with col3:
         if st.button("🔄 Load Buffer Data", type="primary"):
             st.session_state.load_buffer = True
     
     # Fetch buffer optimization data
     if st.session_state.get('load_buffer', False):
         try:
+            params = {'safety_factor': safety_factor}
+            if total_budget > 0:
+                params['total_budget'] = total_budget
+            
             response = requests.get(
                 f"{API_BASE_URL}/buffer-optimization/",
-                params={'safety_factor': safety_factor},
-                timeout=10
+                params=params,
+                timeout=30
             )
             
             if response.status_code == 200:
@@ -1569,15 +1718,25 @@ elif page == "📊 Buffer Optimization":
                 if 'buffer_recommendations' in data and data['buffer_recommendations']:
                     # Display parameters
                     st.subheader("📈 Production Parameters")
-                    params = data['parameters']
+                    params_data = data['parameters']
                     
                     col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Throughput/Hour", f"{params['throughput_per_hour']:.2f} units")
-                    col2.metric("Makespan", f"{params['makespan_hours']:.2f} hours")
-                    col3.metric("Safety Factor", f"{params['safety_factor']}")
-                    col4.metric("Total Units", f"{params['total_units']}")
+                    col1.metric("Throughput/Hour", f"{params_data['throughput_per_hour']:.2f} units")
+                    col2.metric("Makespan", f"{params_data['makespan_hours']:.2f} hours")
+                    col3.metric("Safety Factor", f"{params_data['safety_factor']}")
+                    col4.metric("Total Units", f"{params_data['total_units']}")
                     
                     st.info(f"**Formula:** {data['formula']}")
+                    
+                    # If PuLP allocation was used
+                    if 'pulp_allocation' in data:
+                        st.success(f"""
+                        **🎯 PuLP Optimal Allocation Applied!**
+                        - Budget Available: {data['pulp_allocation']['total_budget']:.2f} units
+                        - Total Required: {data['pulp_allocation']['total_required']:.2f} units
+                        - Total Allocated: {data['pulp_allocation']['total_allocated']:.2f} units
+                        - Optimization: Minimizes utilization-weighted shortfall (high-util machines get buffer first)
+                        """)
                     
                     # Convert to DataFrame
                     df_buffer = pd.DataFrame(data['buffer_recommendations'])
@@ -1628,25 +1787,41 @@ elif page == "📊 Buffer Optimization":
                         )
                         st.plotly_chart(fig_scatter, use_container_width=True)
                     
+                    # If PuLP was used, show allocation vs required
+                    if 'allocated_buffer' in df_buffer.columns:
+                        st.subheader("💰 Budget Allocation (PuLP Optimized)")
+                        
+                        fig_alloc = go.Figure()
+                        fig_alloc.add_trace(go.Bar(
+                            name='Required',
+                            x=df_buffer['machine'],
+                            y=df_buffer['required_buffer'],
+                            marker_color='lightcoral'
+                        ))
+                        fig_alloc.add_trace(go.Bar(
+                            name='Allocated',
+                            x=df_buffer['machine'],
+                            y=df_buffer['allocated_buffer'],
+                            marker_color='lightgreen'
+                        ))
+                        fig_alloc.update_layout(
+                            barmode='group',
+                            title='Required vs Allocated Buffer',
+                            xaxis_title='Machine',
+                            yaxis_title='Buffer Units',
+                            height=400
+                        )
+                        st.plotly_chart(fig_alloc, use_container_width=True)
+                    
                     # Detailed table
                     st.subheader("📋 Detailed Buffer Recommendations")
                     
-                    # Format the dataframe for display
                     df_display = df_buffer.copy()
                     df_display['buffer_size_units'] = df_display['buffer_size_units'].round(2)
                     df_display['utilization'] = df_display['utilization'].apply(lambda x: f"{x:.2f}%")
                     df_display['avg_operation_time_hours'] = df_display['avg_operation_time_hours'].round(4)
                     
-                    st.dataframe(
-                        df_display,
-                        use_container_width=True,
-                        column_config={
-                            "recommendation": st.column_config.TextColumn(
-                                "Priority",
-                                width="medium"
-                            )
-                        }
-                    )
+                    st.dataframe(df_display, use_container_width=True)
                     
                     # Download button
                     csv = df_buffer.to_csv(index=False)
@@ -1666,19 +1841,16 @@ elif page == "📊 Buffer Optimization":
         except Exception as e:
             st.error(f"Error loading buffer data: {str(e)}")
 
+# ==================== PAGE 4: Bottleneck Analysis ====================
 elif page == "🔍 Bottleneck Analysis":
     st.header("Bottleneck Analysis")
     
     if st.button("🔄 Load Bottleneck Data", type="primary"):
         st.session_state.load_bottleneck = True
     
-    # Fetch bottleneck analysis data
     if st.session_state.get('load_bottleneck', False):
         try:
-            response = requests.get(
-                f"{API_BASE_URL}/bottleneck-analysis/",
-                timeout=10
-            )
+            response = requests.get(f"{API_BASE_URL}/bottleneck-analysis/", timeout=30)
             
             if response.status_code == 200:
                 data = response.json()
@@ -1703,7 +1875,7 @@ elif page == "🔍 Bottleneck Analysis":
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        # Horizontal bar chart: Utilization by machine
+                        # Horizontal bar chart
                         fig_util = go.Figure()
                         
                         colors = []
@@ -1737,7 +1909,7 @@ elif page == "🔍 Bottleneck Analysis":
                         st.plotly_chart(fig_util, use_container_width=True)
                     
                     with col2:
-                        # Pie chart: Status distribution
+                        # Pie chart
                         status_counts = df_bottleneck['status'].value_counts()
                         fig_pie = px.pie(
                             values=status_counts.values,
