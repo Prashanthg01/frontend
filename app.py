@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import warnings
 import json
 import time
-
+import os
 # Suppress warnings
 warnings.filterwarnings('ignore')
 
@@ -116,7 +116,7 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
     }
     .progress-container {
-        background: #f0f2f6;
+        background: #2a4a3c;
         border-radius: 10px;
         padding: 20px;
         margin: 20px 0;
@@ -1206,20 +1206,20 @@ elif page == "📅 Schedule Management":
 
     st.sidebar.subheader("📁 Data Initialization")
     
-    with st.sidebar.expander("📤 Upload CSV Files", expanded=True):
-        st.markdown("**Upload your data files:**")
+    with st.sidebar.expander("📤 Upload Data Files", expanded=True):
+        st.markdown("**Upload your data files (CSV or XLSX):**")
         
         frontpage_file = st.file_uploader(
-            "Frontpage.csv",
-            type=['csv'],
-            help="Upload the frontpage CSV containing product demand data",
+            "Frontpage File",
+            type=['csv', 'xlsx', 'xls'],
+            help="Upload the frontpage file (CSV or XLSX) containing product demand data",
             key="frontpage"
         )
         
         process_file = st.file_uploader(
-            "Process.csv",
-            type=['csv'],
-            help="Upload the process CSV containing routing and machine data",
+            "Process File",
+            type=['csv', 'xlsx', 'xls'],
+            help="Upload the process file (CSV or XLSX) containing routing and machine data",
             key="process"
         )
         
@@ -1233,11 +1233,17 @@ elif page == "📅 Schedule Management":
         
         if st.button("🔄 Initialize Database", use_container_width=True):
             if frontpage_file is None or process_file is None:
-                st.error("⚠️ Please upload both CSV files before initializing!")
+                st.error("⚠️ Please upload both files before initializing!")
             else:
+                # Get file extensions
+                frontpage_ext = os.path.splitext(frontpage_file.name)[1]
+                process_ext = os.path.splitext(process_file.name)[1]
+                
                 files = {
-                    'frontpage': ('Frontpage.csv', frontpage_file.getvalue(), 'text/csv'),
-                    'process': ('Process.csv', process_file.getvalue(), 'text/csv')
+                    'frontpage': (frontpage_file.name, frontpage_file.getvalue(), 
+                                'text/csv' if frontpage_ext == '.csv' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+                    'process': (process_file.name, process_file.getvalue(), 
+                            'text/csv' if process_ext == '.csv' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
                 }
                 data_dict = {
                     'async_mode': 'true' if init_async_mode else 'false'
@@ -1254,30 +1260,49 @@ elif page == "📅 Schedule Management":
                         init_result = display_async_progress(result['task_id'], "Database Initialization")
                         
                         if init_result:
-                            st.success(f"✅ {init_result['message']}")
+                            # Handle both nested result structure and direct structure
+                            if 'result' in init_result:
+                                actual_result = init_result['result']
+                            else:
+                                actual_result = init_result
+                            
+                            # Safe get with defaults
+                            message = actual_result.get('message', 'Initialization completed')
+                            products_created = actual_result.get('products_created', 0)
+                            machines_created = actual_result.get('machines_created', 0)
+                            process_steps_created = actual_result.get('process_steps_created', 0)
+                            
+                            st.success(f"✅ {message}")
                             st.info(f"""
                             **Created:**
-                            - {init_result['products_created']} Products
-                            - {init_result['machines_created']} Machines
-                            - {init_result['process_steps_created']} Process Steps
+                            - {products_created} Products
+                            - {machines_created} Machines
+                            - {process_steps_created} Process Steps
                             """)
                             st.rerun()
                     else:
-                        st.success(f"✅ {result['message']}")
+                        # Sync mode response
+                        message = result.get('message', 'Initialization completed')
+                        products_created = result.get('products_created', 0)
+                        machines_created = result.get('machines_created', 0)
+                        process_steps_created = result.get('process_steps_created', 0)
+                        
+                        st.success(f"✅ {message}")
                         st.info(f"""
                         **Created:**
-                        - {result.get('products_created', 0)} Products
-                        - {result.get('machines_created', 0)} Machines
-                        - {result.get('process_steps_created', 0)} Process Steps
+                        - {products_created} Products
+                        - {machines_created} Machines
+                        - {process_steps_created} Process Steps
                         """)
                         st.rerun()
         
-        # Display uploaded file info
+        # Display uploaded file info with file type
         if frontpage_file:
-            st.success(f"✓ Frontpage: {frontpage_file.name}")
+            file_type = "XLSX" if frontpage_file.name.endswith(('.xlsx', '.xls')) else "CSV"
+            st.success(f"✓ Frontpage: {frontpage_file.name} ({file_type})")
         if process_file:
-            st.success(f"✓ Process: {process_file.name}")
-    
+            file_type = "XLSX" if process_file.name.endswith(('.xlsx', '.xls')) else "CSV"
+            st.success(f"✓ Process: {process_file.name} ({file_type})")        
     st.sidebar.markdown("---")
     
     # Schedule Generation with Async Support
