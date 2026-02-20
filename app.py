@@ -5,15 +5,15 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import warnings
 import json
 import time
 import os
-# Suppress warnings
+
 warnings.filterwarnings('ignore')
 
-# Page configuration
+# ── Page configuration ──────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Production Analytics Suite",
     page_icon="🏭",
@@ -21,1173 +21,738 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Enhanced Custom CSS (keeping your original styles)
+# ── CSS ─────────────────────────────────────────────────────────────────────
 st.markdown("""
     <style>
-    .main {
-        background-color: #0e1117;
-    }
-    .stMetric {
-        background-color: #333539;
-        padding: 15px;
-        border-radius: 10px;
-    }
-    h1, h2, h3 {
-        color: #ffffff;
-    }
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 0.5rem;
-    }
-    .sub-header {
-        font-size: 1.2rem;
-        color: #666;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .kpi-card {
-        background-color: #f0f2f6;
-        padding: 1.5rem;
-        border-radius: 0.5rem;
-        border-left: 5px solid #1f77b4;
-    }
-    .kpi-value {
-        font-size: 2rem;
-        font-weight: bold;
-        color: #1f77b4;
-    }
-    .kpi-label {
-        font-size: 0.9rem;
-        color: #666;
-        margin-top: 0.5rem;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 20px;
-        border-radius: 15px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-        margin-bottom: 10px;
-    }
-    .metric-card-green {
-        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    }
-    .metric-card-orange {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    }
-    .metric-card-blue {
-        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-    }
-    .metric-title {
-        color: white;
-        font-size: 14px;
-        font-weight: 500;
-        margin-bottom: 8px;
-        opacity: 0.9;
-    }
-    .metric-value {
-        color: white;
-        font-size: 28px;
-        font-weight: bold;
-        margin-bottom: 8px;
-    }
-    .section-header {
-        color: #00ff9f;
-        font-size: 20px;
-        font-weight: bold;
-        margin: 20px 0 15px 0;
-        padding-left: 10px;
-        border-left: 4px solid #00ff9f;
-    }
-    .nav-button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 10px 20px;
-        border-radius: 8px;
-        border: none;
-        font-weight: bold;
-        cursor: pointer;
-        transition: all 0.3s;
-    }
-    .nav-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-    }
-    .progress-container {
-        background: #2a4a3c;
-        border-radius: 10px;
-        padding: 20px;
-        margin: 20px 0;
-    }
-    .task-status {
-        padding: 10px 20px;
-        border-radius: 8px;
-        font-weight: bold;
-        text-align: center;
-        margin: 10px 0;
-    }
-    .status-processing {
-        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-        color: white;
-    }
-    .status-success {
-        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-        color: white;
-    }
-    .status-error {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        color: white;
-    }
+    .main { background-color: #0e1117; }
+    .stMetric { background-color: #333539; padding: 15px; border-radius: 10px; }
+    h1, h2, h3 { color: #ffffff; }
+    .main-header { font-size: 2.5rem; font-weight: bold; color: #1f77b4;
+                   text-align: center; margin-bottom: 0.5rem; }
+    .sub-header  { font-size: 1.2rem; color: #666; text-align: center;
+                   margin-bottom: 2rem; }
+    .kpi-card    { background-color: #f0f2f6; padding: 1.5rem; border-radius: 0.5rem;
+                   border-left: 5px solid #1f77b4; }
+    .kpi-value   { font-size: 2rem; font-weight: bold; color: #1f77b4; }
+    .kpi-label   { font-size: 0.9rem; color: #666; margin-top: 0.5rem; }
+    .metric-card        { background: linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+                          padding:20px; border-radius:15px;
+                          box-shadow:0 4px 6px rgba(0,0,0,.3); margin-bottom:10px; }
+    .metric-card-green  { background: linear-gradient(135deg,#11998e 0%,#38ef7d 100%); }
+    .metric-card-orange { background: linear-gradient(135deg,#f093fb 0%,#f5576c 100%); }
+    .metric-card-blue   { background: linear-gradient(135deg,#4facfe 0%,#00f2fe 100%); }
+    .metric-title { color:white; font-size:14px; font-weight:500;
+                    margin-bottom:8px; opacity:.9; }
+    .metric-value { color:white; font-size:28px; font-weight:bold; margin-bottom:8px; }
+    .section-header { color:#00ff9f; font-size:20px; font-weight:bold;
+                      margin:20px 0 15px 0; padding-left:10px;
+                      border-left:4px solid #00ff9f; }
+    .progress-container { background:#2a4a3c; border-radius:10px;
+                          padding:20px; margin:20px 0; }
+    .task-status { padding:10px 20px; border-radius:8px; font-weight:bold;
+                   text-align:center; margin:10px 0; }
+    .status-processing { background:linear-gradient(135deg,#4facfe 0%,#00f2fe 100%);
+                         color:white; }
+    .status-success    { background:linear-gradient(135deg,#11998e 0%,#38ef7d 100%);
+                         color:white; }
+    .status-error      { background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%);
+                         color:white; }
     </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
-if 'page' not in st.session_state:
-    st.session_state.page = 'Production Analytics'
-if 'data' not in st.session_state:
-    st.session_state.data = None
-if 'processed' not in st.session_state:
-    st.session_state.processed = False
-if 'filter_options' not in st.session_state:
-    st.session_state.filter_options = None
-if 'filters_loaded' not in st.session_state:
-    st.session_state.filters_loaded = False
-if 'async_task_id' not in st.session_state:
-    st.session_state.async_task_id = None
-if 'task_status' not in st.session_state:
-    st.session_state.task_status = None
+# ── Session state initialisation ─────────────────────────────────────────────
+_defaults = {
+    'page':               'Production Analytics',
+    'data':               None,
+    'processed':          False,
+    'filter_options':     None,
+    'filters_loaded':     False,
+    'async_task_id':      None,
+    'task_status':        None,
+    # Schedule Management
+    'schedule_task_id':   None,
+    'schedule_task_done': False,
+    'gantt_data':         None,
+    'kpi_data':           None,
+    'batch_overrides':    [],
+    'compare_current':    None,
+    'compare_preview':    None,
+    'tbl_page':           1,
+    'tbl_loaded':         False,
+    'timeline_data':      None,
+}
+for k, v in _defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
+# ── Sidebar: API URL ─────────────────────────────────────────────────────────
 API_BASE_URL = st.sidebar.text_input(
     "API Base URL",
     value="http://localhost:8000/api",
     help="Enter your Django API base URL"
 )
 
-# ==================== HELPER FUNCTIONS ====================
+
+# ===========================================================================
+# HELPER FUNCTIONS
+# ===========================================================================
 
 def fetch_data(endpoint, params=None):
-    """Fetch data from Django API"""
     try:
-        response = requests.get(f"{API_BASE_URL}/{endpoint}/", params=params, timeout=30)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"Error fetching data: {response.status_code}")
-            return None
+        r = requests.get(f"{API_BASE_URL}/{endpoint}/", params=params, timeout=30)
+        return r.json() if r.status_code == 200 else (st.error(f"Error {r.status_code}"), None)[1]
     except Exception as e:
-        st.error(f"Connection error: {str(e)}")
+        st.error(f"Connection error: {e}")
         return None
+
 
 def post_data(endpoint, data=None):
-    """Post data to Django API"""
     try:
-        response = requests.post(f"{API_BASE_URL}/{endpoint}/", json=data, timeout=60)
-        if response.status_code in [200, 201, 202]:
-            return response.json()
-        else:
-            st.error(f"Error posting data: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        st.error(f"Connection error: {str(e)}")
+        r = requests.post(f"{API_BASE_URL}/{endpoint}/", json=data, timeout=60)
+        if r.status_code in (200, 201, 202):
+            return r.json()
+        st.error(f"Error {r.status_code}: {r.text}")
         return None
+    except Exception as e:
+        st.error(f"Connection error: {e}")
+        return None
+
 
 def post_files(endpoint, files_dict, data_dict=None):
-    """Post files to Django API with optional form data"""
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/{endpoint}/",
-            files=files_dict,
-            data=data_dict,
-            timeout=120
-        )
-        if response.status_code in [200, 201, 202]:
-            return response.json()
-        else:
-            st.error(f"Error posting data: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        st.error(f"Connection error: {str(e)}")
+        r = requests.post(f"{API_BASE_URL}/{endpoint}/",
+                          files=files_dict, data=data_dict, timeout=120)
+        if r.status_code in (200, 201, 202):
+            return r.json()
+        st.error(f"Error {r.status_code}: {r.text}")
         return None
+    except Exception as e:
+        st.error(f"Connection error: {e}")
+        return None
+
 
 def check_task_status(task_id):
-    """Check the status of an async task"""
     try:
-        response = requests.get(f"{API_BASE_URL}/task-status/{task_id}/", timeout=10)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return None
+        r = requests.get(f"{API_BASE_URL}/task-status/{task_id}/", timeout=10)
+        return r.json() if r.status_code == 200 else None
     except Exception as e:
-        st.error(f"Error checking task status: {str(e)}")
+        st.error(f"Error checking task: {e}")
         return None
 
+
 def poll_task_until_complete(task_id, progress_bar, status_text, max_wait_seconds=300):
-    """
-    Poll task status until complete or timeout.
-    
-    Returns:
-        dict: Task result if successful, None otherwise
-    """
-    start_time = time.time()
-    
-    while time.time() - start_time < max_wait_seconds:
-        status_data = check_task_status(task_id)
-        
-        if status_data:
-            state = status_data.get('state')
-            progress = status_data.get('progress', 0)
-            status_msg = status_data.get('status', 'Processing...')
-            
-            # Update UI
+    start = time.time()
+    while time.time() - start < max_wait_seconds:
+        data = check_task_status(task_id)
+        if data:
+            state    = data.get('state')
+            progress = data.get('progress', 0)
+            msg      = data.get('status', 'Processing...')
             progress_bar.progress(progress / 100.0)
-            status_text.text(f"📊 {status_msg} ({progress}%)")
-            
+            status_text.text(f"📊 {msg} ({progress}%)")
             if state == 'SUCCESS':
-                return status_data.get('result')
-            elif state == 'FAILURE':
-                st.error(f"❌ Task failed: {status_data.get('error', 'Unknown error')}")
+                return data.get('result')
+            if state == 'FAILURE':
+                st.error(f"❌ Task failed: {data.get('error', 'Unknown error')}")
                 return None
-        
-        time.sleep(2)  # Poll every 2 seconds
-    
-    st.warning("⏱️ Task is taking longer than expected. Check back later.")
+        time.sleep(2)
+    st.warning("⏱️ Task taking longer than expected. Check back later.")
     return None
 
+
 def display_async_progress(task_id, operation_name="Operation"):
-    """Display progress for an async task with live updates"""
     st.markdown(f"""
         <div class="progress-container">
             <h4>⏳ {operation_name} in Progress</h4>
             <p>Task ID: <code>{task_id}</code></p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    result = poll_task_until_complete(task_id, progress_bar, status_text)
-    
+        </div>""", unsafe_allow_html=True)
+    pb  = st.progress(0)
+    txt = st.empty()
+    result = poll_task_until_complete(task_id, pb, txt)
     if result:
         st.success(f"✅ {operation_name} completed successfully!")
-        return result
-    return None
+    return result
 
-# ==================== VISUALIZATION FUNCTIONS ====================
 
-def generate_timeline_html(df_schedule, start_time, end_time, time_interval_minutes=30):
-    """Generate custom timeline HTML with times on Y-axis and machines on X-axis"""
-    if df_schedule.empty:
-        return "<html><body><p>No schedule data available</p></body></html>"
-    
-    # Convert times
-    df = df_schedule.copy()
-    df['start_time'] = pd.to_datetime(df['start_time'])
-    df['end_time'] = pd.to_datetime(df['end_time'])
-    
-    # Get unique machines
-    machines = sorted(df['machine_name'].unique())
-    num_machines = len(machines)
-    
-    # Calculate timeline range - ensure timezone consistency
-    timeline_start = pd.to_datetime(start_time)
-    timeline_end = pd.to_datetime(end_time)
-    
-    # Check if the dataframe times have timezone info
-    if df['start_time'].dt.tz is not None:
-        if timeline_start.tz is None:
-            timeline_start = timeline_start.tz_localize(df['start_time'].dt.tz)
-        if timeline_end.tz is None:
-            timeline_end = timeline_end.tz_localize(df['start_time'].dt.tz)
-    else:
-        if timeline_start.tz is not None:
-            timeline_start = timeline_start.tz_localize(None)
-        if timeline_end.tz is not None:
-            timeline_end = timeline_end.tz_localize(None)
-    
-    total_hours = (timeline_end - timeline_start).total_seconds() / 3600
-    
-    # Generate time slots
-    time_slots = []
-    current_time = timeline_start
-    while current_time < timeline_end:
-        time_slots.append(current_time)
-        current_time += timedelta(minutes=time_interval_minutes)
-    
-    num_slots = len(time_slots)
-    
-    # Build complete HTML document with embedded styles
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <style>
-            body {
-                margin: 0;
-                padding: 20px;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
-                background: #ffffff;
-            }
-            
-            .timeline-container {
-                width: 100%;
-                overflow-x: auto;
-                overflow-y: auto;
-                background: white;
-                border-radius: 8px;
-                padding: 20px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            
-            .timeline-grid {
-                display: grid;
-                grid-template-rows: auto 1fr;
-                min-height: 600px;
-                gap: 0;
-            }
-            
-            .machine-header-row {
-                display: grid;
-                grid-template-columns: 120px repeat(""" + str(num_machines) + """, 200px);
-                border-bottom: 2px solid #dee2e6;
-                background: #f8f9fa;
-                position: sticky;
-                top: 0;
-                z-index: 10;
-            }
-            
-            .corner-cell {
-                padding: 15px;
-                background: #e9ecef;
-                border-right: 2px solid #dee2e6;
-                font-weight: bold;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                color: #495057;
-            }
-            
-            .machine-header {
-                font-weight: bold;
-                padding: 15px;
-                text-align: center;
-                border-right: 1px solid #e9ecef;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                color: #495057;
-                background: #f8f9fa;
-            }
-            
-            .timeline-body {
-                display: grid;
-                grid-template-columns: 120px repeat(""" + str(num_machines) + """, 200px);
-                grid-template-rows: repeat(""" + str(num_slots) + """, 60px);
-            }
-            
-            .time-label {
-                padding: 10px 15px;
-                background: #f8f9fa;
-                border-right: 2px solid #dee2e6;
-                border-bottom: 1px solid #e9ecef;
-                display: flex;
-                flex-direction: column;
-                align-items: flex-start;
-                justify-content: center;
-                font-size: 0.85rem;
-                color: #6c757d;
-                font-weight: 600;
-                position: sticky;
-                left: 0;
-                z-index: 5;
-            }
-            
-            .time-date {
-                font-size: 0.75rem;
-                color: #868e96;
-            }
-            
-            .machine-cell {
-                border-right: 1px solid #e9ecef;
-                border-bottom: 1px solid #e9ecef;
-                position: relative;
-                background: white;
-            }
-            
-            .schedule-card {
-                position: absolute;
-                left: 5px;
-                right: 5px;
-                border-radius: 6px;
-                padding: 8px 12px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-                color: white;
-                font-size: 0.85rem;
-                font-weight: 500;
-                cursor: pointer;
-                transition: all 0.2s;
-                overflow: hidden;
-                z-index: 2;
-            }
-            
-            .schedule-card:hover {
-                transform: scale(1.02);
-                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-                z-index: 3;
-            }
-            
-            .card-title {
-                font-weight: 600;
-                font-size: 0.9rem;
-                margin-bottom: 2px;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            }
-            
-            .card-subtitle {
-                font-size: 0.75rem;
-                opacity: 0.9;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            }
-            
-            /* Color schemes for different items */
-            .item-1 { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-            .item-2 { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-            .item-3 { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
-            .item-4 { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
-            .item-5 { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
-            .item-6 { background: linear-gradient(135deg, #30cfd0 0%, #330867 100%); }
-            .item-7 { background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); }
-            .item-8 { background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); }
-            .item-9 { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%); }
-            .item-10 { background: linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%); }
-            
-            .legend {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 15px;
-                margin: 20px 0;
-                padding: 15px;
-                background: #f8f9fa;
-                border-radius: 6px;
-            }
-            
-            .legend-item {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                font-size: 0.85rem;
-            }
-            
-            .legend-color {
-                width: 30px;
-                height: 20px;
-                border-radius: 4px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-        </style>
-    </head>
-    <body>
+# ===========================================================================
+# GANTT HELPER
+# ===========================================================================
+
+_PALETTE = px.colors.qualitative.Plotly + px.colors.qualitative.D3
+
+
+def _product_color(color_key: int) -> str:
+    return _PALETTE[color_key % len(_PALETTE)]
+
+
+def _to_naive_utc(dt: datetime) -> datetime:
+    """Strip timezone info, converting to UTC first if tz-aware."""
+    if dt.tzinfo is not None:
+        # Convert to UTC then remove tzinfo
+        dt = dt.utctimetuple()
+        dt = datetime(*dt[:6])
+    return dt
+
+
+def _parse_iso(s: str) -> datetime:
+    """Parse ISO string and return naive UTC datetime."""
+    dt = datetime.fromisoformat(s)
+    return _to_naive_utc(dt)
+
+
+def _compute_gaps_from_bars(bars: list) -> dict:
     """
-    
-    html += '<div class="timeline-container">'
-    html += '<div class="timeline-grid">'
-    
-    # Machine header row
-    html += '<div class="machine-header-row">'
-    html += '<div class="corner-cell">Time / Machine</div>'
-    
-    for machine in machines:
-        html += f'<div class="machine-header">{machine}</div>'
-    
-    html += '</div>'
-    html += '<div class="timeline-body">'
-    
-    for slot_idx, time_slot in enumerate(time_slots):
-        time_str = time_slot.strftime('%H:%M')
-        date_str = time_slot.strftime('%m/%d')
-        html += f'''
-        <div class="time-label">
-            <div>{time_str}</div>
-            <div class="time-date">{date_str}</div>
-        </div>
-        '''
-        
-        slot_start = time_slot
-        slot_end = time_slot + timedelta(minutes=time_interval_minutes)
-        
-        for machine in machines:
-            html += '<div class="machine-cell">'
-            machine_data = df[df['machine_name'] == machine]
-            
-            for _, row in machine_data.iterrows():
-                sched_start = row['start_time']
-                sched_end = row['end_time']
-                
-                if sched_start < slot_end and sched_end > slot_start:
-                    if slot_start <= sched_start < slot_end:
-                        display_start = max(sched_start, slot_start)
-                        display_end = min(sched_end, slot_end)
-                        
-                        slot_duration = (slot_end - slot_start).total_seconds()
-                        offset_seconds = (display_start - slot_start).total_seconds()
-                        duration_seconds = (display_end - display_start).total_seconds()
-                        
-                        top_percent = (offset_seconds / slot_duration) * 100
-                        height_percent = (duration_seconds / slot_duration) * 100
-                        
-                        total_duration = (sched_end - sched_start).total_seconds()
-                        num_slots_span = total_duration / (time_interval_minutes * 60)
-                        total_height_percent = height_percent * num_slots_span
-                        
-                        item_class = f"item-{row['product_item'] % 10 + 1}"
-                        batch_id = row['batch_id']
-                        step_num = row['step_number']
-                        step_name = str(row['step_name'])[:30]
-                        
-                        html += f'''
-                        <div class="schedule-card {item_class}" 
-                             style="top: {top_percent}%; height: {total_height_percent}%;"
-                             title="{batch_id} - Step {step_num}: {step_name}">
-                            <div class="card-title">Step {step_num}</div>
-                            <div class="card-subtitle">{batch_id}</div>
-                        </div>
-                        '''
-            
-            html += '</div>'
-    
-    html += '</div></div></div>'
-    
-    # Add legend
-    html += '<div class="legend">'
-    items = sorted(df['product_item'].unique())
-    for item in items:
-        item_desc = df[df['product_item'] == item]['product_description'].iloc[0]
-        short_desc = item_desc[:40] + "..." if len(item_desc) > 40 else item_desc
-        html += f'''
-        <div class="legend-item">
-            <div class="legend-color item-{item % 10 + 1}"></div>
-            <span><strong>Item {item}:</strong> {short_desc}</span>
-        </div>
-        '''
-    html += '</div>'
-    
-    html += '</body></html>'
-    return html
+    Pure-frontend gap analysis — no extra API call needed.
+    Works on already-loaded gantt_data bars.
+    Each bar must have: machine, start (ISO str), end (ISO str),
+                        product, step, batch_id
+    """
+    from collections import defaultdict as _dd
+    machine_ops = _dd(list)
+    for b in bars:
+        machine_ops[b['machine']].append(b)
 
-def create_gantt_chart(df_schedule):
-    """Create Gantt chart for production schedule"""
-    if df_schedule.empty:
-        return None
-    
-    df_gantt = df_schedule.copy()
-    df_gantt['Start'] = pd.to_datetime(df_gantt['start_time'])
-    df_gantt['Finish'] = pd.to_datetime(df_gantt['end_time'])
-    df_gantt['Task'] = df_gantt['machine_name']
-    df_gantt['Resource'] = df_gantt['batch_id'] + ' - Step ' + df_gantt['step_number'].astype(str)
-    
-    fig = px.timeline(
-        df_gantt,
-        x_start='Start',
-        x_end='Finish',
-        y='Task',
-        color='product_item',
-        hover_data=['batch_id', 'step_name', 'duration_hours', 'product_description'],
-        title='Production Schedule Gantt Chart',
-        labels={'Task': 'Machine', 'product_item': 'Product Item'},
-        color_continuous_scale='Viridis'
-    )
-    
-    fig.update_yaxes(categoryorder='category ascending')
-    fig.update_layout(
-        height=600,
-        xaxis_title='Time',
-        showlegend=True,
-        hovermode='closest'
-    )
-    
-    return fig
+    gap_list, machine_stats = [], []
+    causes = {'precedence': 0, 'interleave': 0, 'spt': 0}
 
-def create_machine_utilization_chart(machine_stats):
-    """Create machine utilization bar chart"""
-    if not machine_stats:
-        return None
-    
-    machines = [stat['machine'] for stat in machine_stats]
-    utilizations = [stat['utilization'] for stat in machine_stats]
-    
-    fig = go.Figure(data=[
-        go.Bar(
-            x=machines,
-            y=utilizations,
-            text=[f"{u:.1f}%" for u in utilizations],
-            textposition='auto',
-            marker_color='lightblue'
+    for machine, mops in machine_ops.items():
+        mops_s = sorted(mops, key=lambda o: _parse_iso(o['start']))
+        idle_hours, gap_count = 0.0, 0
+
+        for i in range(1, len(mops_s)):
+            prev = mops_s[i - 1]
+            curr = mops_s[i]
+            gap_secs = (_parse_iso(curr['start']) - _parse_iso(prev['end'])).total_seconds()
+
+            if gap_secs > 60:
+                idle_h = gap_secs / 3600
+                idle_hours += idle_h
+                gap_count  += 1
+
+                if str(curr.get('product','')) != str(prev.get('product','')):
+                    cause = 'interleave'; causes['interleave'] += 1
+                elif curr.get('step', 1) > 1:
+                    cause = 'precedence'; causes['precedence'] += 1
+                else:
+                    cause = 'spt'; causes['spt'] += 1
+
+                gap_list.append({
+                    'machine':    machine,
+                    'gap_start':  prev['end'],
+                    'gap_end':    curr['start'],
+                    'idle_hours': round(idle_h, 3),
+                    'cause':      cause,
+                    'before_op':  f"P{prev.get('product')} Step {prev.get('step')}",
+                    'after_op':   f"P{curr.get('product')} Step {curr.get('step')}",
+                })
+
+        machine_stats.append({'machine': machine,
+                               'idle_hours': round(idle_hours, 3),
+                               'gap_count': gap_count})
+
+    worst = max(machine_stats, key=lambda r: r['idle_hours'])['machine'] if machine_stats else '—'
+    clean = sum(1 for r in machine_stats if r['gap_count'] == 0)
+    return {
+        'total_gaps':       len(gap_list),
+        'total_idle_hours': round(sum(g['idle_hours'] for g in gap_list), 2),
+        'worst_machine':    worst,
+        'clean_machines':   clean,
+        'machine_stats':    machine_stats,
+        'gap_list':         gap_list,
+        'causes':           causes,
+    }
+
+
+def build_gantt_figure(gantt_data: dict, height: int = 600) -> go.Figure:
+    bars     = gantt_data.get('gantt_bars', [])
+    machines = gantt_data.get('machines', [])
+
+    if not bars:
+        fig = go.Figure()
+        fig.update_layout(title="No schedule data available",
+                          template='plotly_dark', height=height)
+        return fig
+
+    fig           = go.Figure()
+    seen_products = set()
+    _epoch        = datetime(1970, 1, 1)   # always naive
+
+    for bar in bars:
+        product  = bar['product']
+        color    = _product_color(bar['color_key'])
+        start_dt = _parse_iso(bar['start'])
+        end_dt   = _parse_iso(bar['end'])
+        dur_h    = bar['duration_h']
+
+        show_legend = product not in seen_products
+        seen_products.add(product)
+
+        hover = (
+            f"<b>Product:</b> {product}<br>"
+            f"<b>Machine:</b> {bar['machine']}<br>"
+            f"<b>Batch:</b> {bar['batch_id']} (#{bar['batch_num']})<br>"
+            f"<b>Step:</b> {bar['step']} – {bar['step_name']}<br>"
+            f"<b>Start:</b> {start_dt.strftime('%Y-%m-%d %H:%M')}<br>"
+            f"<b>End:</b>   {end_dt.strftime('%Y-%m-%d %H:%M')}<br>"
+            f"<b>Duration:</b> {dur_h:.2f} h"
         )
-    ])
-    
+
+        fig.add_trace(go.Bar(
+            name          = str(product),
+            x             = [dur_h],
+            y             = [bar['machine']],
+            orientation   = 'h',
+            base          = [(start_dt - _epoch).total_seconds() / 3600],
+            marker_color  = color,
+            opacity       = 0.85,
+            hovertemplate = hover + "<extra></extra>",
+            showlegend    = show_legend,
+            legendgroup   = str(product),
+        ))
+
+    dr      = gantt_data.get('date_range', {})
+    x_start = _parse_iso(dr['start']) if dr.get('start') else None
+    x_end   = _parse_iso(dr['end'])   if dr.get('end')   else None
+    x0_hrs  = (x_start - _epoch).total_seconds() / 3600 if x_start else 0
+    x1_hrs  = (x_end   - _epoch).total_seconds() / 3600 if x_end   else x0_hrs + 24
+
+    span_days = (x1_hrs - x0_hrs) / 24
+    tick_step = 24 if span_days <= 7 else (7 * 24 if span_days <= 30 else 14 * 24)
+    tick_vals = list(range(int(x0_hrs), int(x1_hrs) + 1, tick_step))
+    tick_text = [
+        (_epoch + pd.Timedelta(hours=h)).strftime('%b %d') for h in tick_vals
+    ]
+
     fig.update_layout(
-        title='Machine Utilization',
-        xaxis_title='Machine',
-        yaxis_title='Utilization (%)',
-        height=400,
-        yaxis_range=[0, 100]
+        template  = 'plotly_dark',
+        height    = max(height, 60 * len(machines) + 150),
+        barmode   = 'overlay',
+        title     = "Production Schedule – Gantt Chart",
+        xaxis     = dict(title='Date', tickvals=tick_vals, ticktext=tick_text,
+                         range=[x0_hrs, x1_hrs], showgrid=True, gridcolor='#444'),
+        yaxis     = dict(title='Machine', autorange='reversed',
+                         showgrid=True, gridcolor='#333'),
+        legend    = dict(title='Product', orientation='v', x=1.01, y=1),
+        margin    = dict(l=160, r=160, t=60, b=60),
     )
-    
     return fig
 
-def create_batch_comparison_chart(batch_analysis):
-    """Create comparison chart for batch optimization"""
-    df = pd.DataFrame(batch_analysis)
-    
-    fig = go.Figure()
-    
-    fig.add_trace(go.Bar(
-        name='Old Method (Fixed 12)',
-        x=df['item'],
-        y=df['old_num_batches'],
-        marker_color='lightcoral',
-        text=df['old_num_batches'],
-        textposition='auto',
-    ))
-    
-    fig.add_trace(go.Bar(
-        name='Optimized Method',
-        x=df['item'],
-        y=df['new_num_batches'],
-        marker_color='lightgreen',
-        text=df['new_num_batches'],
-        textposition='auto',
-    ))
-    
-    fig.update_layout(
-        title='Batch Count Comparison: Old vs Optimized',
-        xaxis_title='Product Item',
-        yaxis_title='Number of Batches',
-        barmode='group',
-        height=400,
-        showlegend=True
-    )
-    
-    return fig
 
-# ==================== MAIN NAVIGATION ====================
+# ===========================================================================
+# SCHEDULE PROGRESS WIDGET
+# ===========================================================================
+
+def _render_task_progress(task_id: str, api_url: str):
+    placeholder  = st.empty()
+    progress_bar = st.progress(0)
+    status_text  = st.empty()
+
+    for _ in range(150):   # ~5 min at 2-second polls
+        try:
+            resp = requests.get(f"{api_url}/task-status/{task_id}/", timeout=10)
+            if not resp.ok:
+                status_text.warning("Could not reach task status endpoint.")
+                break
+
+            d     = resp.json()
+            state = d.get('state', 'PENDING')
+            pct   = d.get('progress', 0)
+            msg   = d.get('status', 'Processing…')
+
+            progress_bar.progress(min(pct / 100.0, 1.0))
+            status_text.markdown(f"**{msg}** ({pct}%)")
+
+            if state == 'SUCCESS':
+                result = d.get('result', {})
+                kpis   = result.get('kpis', {})
+                placeholder.markdown(f"""
+                <div style='background:#1a3a2a;border-left:4px solid #10b981;
+                            padding:14px 18px;border-radius:6px;'>
+                <b style='color:#10b981'>✅ Schedule Generated Successfully!</b><br>
+                <span style='color:#ccc'>
+                Operations saved: <b>{result.get('total_operations', '—'):,}</b><br>
+                Makespan: <b>{kpis.get('makespan_hours','—')} h</b> &nbsp;/&nbsp;
+                <b>{kpis.get('makespan_days','—')} days</b><br>
+                Bottleneck: <b>{kpis.get('bottleneck_machine','—')}</b>
+                ({kpis.get('bottleneck_util','—')}% utilisation)
+                </span></div>
+                """, unsafe_allow_html=True)
+                st.session_state.kpi_data           = kpis
+                st.session_state.schedule_task_done = True
+                break
+
+            elif state == 'FAILURE':
+                placeholder.error(f"❌ Task failed: {d.get('error','Unknown error')}")
+                st.session_state.schedule_task_done = True
+                break
+
+        except Exception as e:
+            status_text.warning(f"Polling error: {e}")
+            break
+
+        time.sleep(2)
+
+    progress_bar.empty()
+    status_text.empty()
+
+
+# ===========================================================================
+# NAVIGATION
+# ===========================================================================
 
 st.sidebar.title("🏭 Production Suite")
 page = st.sidebar.radio(
     "Navigate",
-    ["📊 Production Analytics", "📅 Schedule Management", "📊 Buffer Optimization", "🔍 Bottleneck Analysis"],
+    ["📊 Production Analytics",
+     "📅 Schedule Management",
+     "📊 Buffer Optimization",
+     "🔍 Bottleneck Analysis"],
     key="navigation"
 )
-
 st.sidebar.markdown("---")
 
-# ==================== PAGE 1: Production Analytics ====================
+
+# ===========================================================================
+# PAGE 1 – Production Analytics
+# ===========================================================================
+
 if page == "📊 Production Analytics":
     st.title("📊 Production Analytics Dashboard")
-    
-    # Sidebar Configuration
+
     with st.sidebar:
         st.header("⚙️ Configuration")
         uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
-        
+
         if uploaded_file is not None:
             st.success("✅ File uploaded successfully!")
-            
             if not st.session_state.filters_loaded:
                 with st.spinner("Loading filter options..."):
                     uploaded_file.seek(0)
                     try:
-                        response = requests.post(
-                            f"{API_BASE_URL}/csv-filter-options/",
-                            files={"file": uploaded_file}
-                        )
-                        if response.status_code == 200:
-                            st.session_state.filter_options = response.json()
+                        r = requests.post(f"{API_BASE_URL}/csv-filter-options/",
+                                          files={"file": uploaded_file})
+                        if r.status_code == 200:
+                            st.session_state.filter_options = r.json()
                             st.session_state.filters_loaded = True
                     except Exception as e:
-                        st.error(f"Error loading filters: {str(e)}")
-        
-        num_shifts = st.number_input(
-            "Number of shifts",
-            min_value=1,
-            max_value=200,
-            value=28,
-            help="Enter the total number of shifts to analyze"
-        )
-        
-        # Data Filters Section
+                        st.error(f"Error loading filters: {e}")
+
+        num_shifts = st.number_input("Number of shifts", min_value=1,
+                                     max_value=200, value=28,
+                                     help="Total number of shifts to analyse")
+
         if st.session_state.filters_loaded and st.session_state.filter_options:
             st.markdown("---")
             st.subheader("🔍 Data Filters")
             st.markdown("*Filter data by specific criteria*")
-            
-            filter_opts = st.session_state.filter_options
-            
-            selected_pps_tn = st.selectbox(
-                "PPS TN",
-                ["All"] + filter_opts.get('PPS TN', []),
-                help="Filter by PPS TN"
-            )
-            
-            selected_project = st.selectbox(
-                "Project",
-                ["All"] + filter_opts.get('Project', []),
-                help="Filter by Project"
-            )
-            
-            selected_sub_project = st.selectbox(
-                "Sub-Project",
-                ["All"] + filter_opts.get('Sub-Project', []),
-                help="Filter by Sub-Project"
-            )
-            
-            selected_machine = st.selectbox(
-                "Machine",
-                ["All"] + filter_opts.get('Machine', []),
-                help="Filter by Machine"
-            )
-            
-            selected_tool_no = st.selectbox(
-                "Tool No.",
-                ["All"] + filter_opts.get('Tool No.', []),
-                help="Filter by Tool Number"
-            )
-            
-            selected_area = st.selectbox(
-                "Area",
-                ["All"] + filter_opts.get('Area', []),
-                help="Filter by Area"
-            )
+            fo = st.session_state.filter_options
+            selected_pps_tn      = st.selectbox("PPS TN",      ["All"] + fo.get('PPS TN', []))
+            selected_project     = st.selectbox("Project",     ["All"] + fo.get('Project', []))
+            selected_sub_project = st.selectbox("Sub-Project", ["All"] + fo.get('Sub-Project', []))
+            selected_machine     = st.selectbox("Machine",     ["All"] + fo.get('Machine', []))
+            selected_tool_no     = st.selectbox("Tool No.",    ["All"] + fo.get('Tool No.', []))
+            selected_area        = st.selectbox("Area",        ["All"] + fo.get('Area', []))
         else:
-            selected_pps_tn = "All"
-            selected_project = "All"
-            selected_sub_project = "All"
-            selected_machine = "All"
-            selected_tool_no = "All"
-            selected_area = "All"
+            selected_pps_tn = selected_project = selected_sub_project = "All"
+            selected_machine = selected_tool_no = selected_area = "All"
 
-    # Submit button
     if st.sidebar.button("🚀 Process & Analyze", type="primary", use_container_width=True):
         if uploaded_file:
-            with st.spinner("🔄 Processing data with selected filters..."):
+            with st.spinner("🔄 Processing data..."):
                 uploaded_file.seek(0)
                 try:
-                    filter_data = {
-                        "num_shifts": num_shifts,
-                        "pps_tn": selected_pps_tn,
-                        "project": selected_project,
-                        "sub_project": selected_sub_project,
-                        "machine": selected_machine,
-                        "tool_no": selected_tool_no,
-                        "area": selected_area
-                    }
-                    
-                    response = requests.post(
+                    r = requests.post(
                         f"{API_BASE_URL}/process-csv/",
-                        data=filter_data,
+                        data={
+                            "num_shifts":   num_shifts,
+                            "pps_tn":       selected_pps_tn,
+                            "project":      selected_project,
+                            "sub_project":  selected_sub_project,
+                            "machine":      selected_machine,
+                            "tool_no":      selected_tool_no,
+                            "area":         selected_area,
+                        },
                         files={"file": uploaded_file}
                     )
-                    
-                    if response.status_code == 200:
-                        st.session_state.data = response.json()
+                    if r.status_code == 200:
+                        st.session_state.data      = r.json()
                         st.session_state.processed = True
                         st.sidebar.success("✅ Analysis complete!")
-                        
-                        active_filters = []
-                        if selected_pps_tn != "All":
-                            active_filters.append(f"PPS TN: {selected_pps_tn}")
-                        if selected_project != "All":
-                            active_filters.append(f"Project: {selected_project}")
-                        if selected_sub_project != "All":
-                            active_filters.append(f"Sub-Project: {selected_sub_project}")
-                        if selected_machine != "All":
-                            active_filters.append(f"Machine: {selected_machine}")
-                        if selected_tool_no != "All":
-                            active_filters.append(f"Tool No.: {selected_tool_no}")
-                        if selected_area != "All":
-                            active_filters.append(f"Area: {selected_area}")
-                        
-                        if active_filters:
-                            st.sidebar.info("**Active Filters:**\n" + "\n".join([f"- {f}" for f in active_filters]))
+                        active = [
+                            f"{label}: {val}"
+                            for label, val in [
+                                ("PPS TN", selected_pps_tn),
+                                ("Project", selected_project),
+                                ("Sub-Project", selected_sub_project),
+                                ("Machine", selected_machine),
+                                ("Tool No.", selected_tool_no),
+                                ("Area", selected_area),
+                            ]
+                            if val != "All"
+                        ]
+                        if active:
+                            st.sidebar.info("**Active Filters:**\n" +
+                                            "\n".join(f"- {f}" for f in active))
                     else:
-                        st.error(f"❌ Error: {response.text}")
+                        st.error(f"❌ Error: {r.text}")
                 except Exception as e:
-                    st.error(f"❌ Connection error: {str(e)}")
+                    st.error(f"❌ Connection error: {e}")
         else:
             st.warning("⚠️ Please upload a file first.")
 
-    # Main content
     if st.session_state.processed and st.session_state.data:
-        data = st.session_state.data
-        shift_data = data["ShiftWise"]
+        data        = st.session_state.data
+        shift_data  = data["ShiftWise"]
         summary_data = data["Summary"]
-        
-        df_shift = pd.DataFrame(shift_data).T
-        df_summary = pd.DataFrame(summary_data)
-        
-        # Additional sidebar filters for visualization
+        df_shift    = pd.DataFrame(shift_data).T
+        df_summary  = pd.DataFrame(summary_data)
+
         with st.sidebar:
             st.markdown("---")
             st.subheader("📊 Display Options")
-            
-            metrics = list(shift_data.keys())
-            selected_metrics = st.multiselect(
-                "Select Metrics to Display",
-                metrics,
-                default=metrics
-            )
-            
-            all_shifts = list(shift_data[metrics[0]].keys())
-            shift_range = st.select_slider(
-                "Select Shift Range",
-                options=all_shifts,
-                value=(all_shifts[0], all_shifts[-1])
-            )
-            
-            chart_type = st.selectbox(
-                "Primary Chart Type",
-                ["Line Chart", "Bar Chart", "Area Chart", "Combined"]
-            )
-        
-        start_idx = all_shifts.index(shift_range[0])
-        end_idx = all_shifts.index(shift_range[1]) + 1
+            metrics          = list(shift_data.keys())
+            selected_metrics = st.multiselect("Select Metrics to Display",
+                                              metrics, default=metrics)
+            all_shifts  = list(shift_data[metrics[0]].keys())
+            shift_range = st.select_slider("Select Shift Range",
+                                           options=all_shifts,
+                                           value=(all_shifts[0], all_shifts[-1]))
+            chart_type  = st.selectbox("Primary Chart Type",
+                                       ["Line Chart", "Bar Chart", "Area Chart", "Combined"])
+
+        start_idx      = all_shifts.index(shift_range[0])
+        end_idx        = all_shifts.index(shift_range[1]) + 1
         filtered_shifts = all_shifts[start_idx:end_idx]
-        
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Production Charts", "⚡ Efficiency Analysis", "📋 Data Tables", "📥 Downloads"])
-        
+
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📊 Production Charts", "⚡ Efficiency Analysis",
+            "📋 Data Tables", "📥 Downloads"
+        ])
+
         with tab1:
             st.subheader("Production Output Analysis")
-            
-            summary_metrics = df_summary['Metric'].tolist()
-            fg_summary_str = df_summary['Finished Goods'].tolist()
-            conn_summary_str = df_summary['Connectors'].tolist()
-            
-            fg_summary = [float(val.replace(',', '')) for val in fg_summary_str]
-            conn_summary = [float(val.replace(',', '')) for val in conn_summary_str]
-            
-            # Finished Goods Section
-            st.markdown('<div class="section-header">🎯 Finished Goods</div>', unsafe_allow_html=True)
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.markdown(f"""
-                <div class="metric-card metric-card-blue">
-                    <div class="metric-title">📋 {summary_metrics[0]}</div>
-                    <div class="metric-value">{fg_summary_str[0]}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                st.markdown(f"""
-                <div class="metric-card metric-card-green">
-                    <div class="metric-title">✅ {summary_metrics[1]}</div>
-                    <div class="metric-value">{fg_summary_str[1]}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-            with col3:
-                st.markdown(f"""
-                <div class="metric-card metric-card-orange">
-                    <div class="metric-title">⏳ {summary_metrics[2]}</div>
-                    <div class="metric-value">{fg_summary_str[2]}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col4:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">📂 {summary_metrics[3]}</div>
-                    <div class="metric-value">{fg_summary_str[3]}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            if fg_summary[0] > 0:
-                fg_progress = (fg_summary[1] / fg_summary[0]) * 100
+            sm        = df_summary['Metric'].tolist()
+            fg_str    = df_summary['Finished Goods'].tolist()
+            conn_str  = df_summary['Connectors'].tolist()
+            fg_vals   = [float(v.replace(',','')) for v in fg_str]
+            conn_vals = [float(v.replace(',','')) for v in conn_str]
+
+            # ── Finished Goods summary cards ──────────────────────────
+            st.markdown('<div class="section-header">🎯 Finished Goods</div>',
+                        unsafe_allow_html=True)
+            c1, c2, c3, c4 = st.columns(4)
+            for col, cls, icon, idx in [
+                (c1, "metric-card-blue",   "📋", 0),
+                (c2, "metric-card-green",  "✅", 1),
+                (c3, "metric-card-orange", "⏳", 2),
+                (c4, "metric-card",        "📂", 3),
+            ]:
+                with col:
+                    st.markdown(f"""
+                    <div class="metric-card {cls}">
+                        <div class="metric-title">{icon} {sm[idx]}</div>
+                        <div class="metric-value">{fg_str[idx]}</div>
+                    </div>""", unsafe_allow_html=True)
+
+            if fg_vals[0] > 0:
+                pct = fg_vals[1] / fg_vals[0] * 100
                 st.markdown("**Production Progress**")
-                st.progress(min(fg_progress / 100, 1.0))
-                st.markdown(f"<p style='text-align: center; color: #00ff9f; font-weight: bold;'>{fg_progress:.1f}% Complete ({fg_summary_str[1]} / {fg_summary_str[0]})</p>", unsafe_allow_html=True)
-            
+                st.progress(min(pct / 100, 1.0))
+                st.markdown(
+                    f"<p style='text-align:center;color:#00ff9f;font-weight:bold;'>"
+                    f"{pct:.1f}% Complete ({fg_str[1]} / {fg_str[0]})</p>",
+                    unsafe_allow_html=True)
+
             st.markdown("<br>", unsafe_allow_html=True)
-            
-            # Connectors Section
-            st.markdown('<div class="section-header">🔌 Connectors</div>', unsafe_allow_html=True)
-            col5, col6, col7, col8 = st.columns(4)
-            
-            with col5:
-                st.markdown(f"""
-                <div class="metric-card metric-card-blue">
-                    <div class="metric-title">📋 {summary_metrics[0]}</div>
-                    <div class="metric-value">{conn_summary_str[0]}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col6:
-                st.markdown(f"""
-                <div class="metric-card metric-card-green">
-                    <div class="metric-title">✅ {summary_metrics[1]}</div>
-                    <div class="metric-value">{conn_summary_str[1]}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-            with col7:
-                st.markdown(f"""
-                <div class="metric-card metric-card-orange">
-                    <div class="metric-title">⏳ {summary_metrics[2]}</div>
-                    <div class="metric-value">{conn_summary_str[2]}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col8:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">📂 {summary_metrics[3]}</div>
-                    <div class="metric-value">{conn_summary_str[3]}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            if conn_summary[0] > 0:
-                conn_progress = (conn_summary[1] / conn_summary[0]) * 100
+
+            # ── Connectors summary cards ───────────────────────────────
+            st.markdown('<div class="section-header">🔌 Connectors</div>',
+                        unsafe_allow_html=True)
+            c5, c6, c7, c8 = st.columns(4)
+            for col, cls, icon, idx in [
+                (c5, "metric-card-blue",   "📋", 0),
+                (c6, "metric-card-green",  "✅", 1),
+                (c7, "metric-card-orange", "⏳", 2),
+                (c8, "metric-card",        "📂", 3),
+            ]:
+                with col:
+                    st.markdown(f"""
+                    <div class="metric-card {cls}">
+                        <div class="metric-title">{icon} {sm[idx]}</div>
+                        <div class="metric-value">{conn_str[idx]}</div>
+                    </div>""", unsafe_allow_html=True)
+
+            if conn_vals[0] > 0:
+                pct = conn_vals[1] / conn_vals[0] * 100
                 st.markdown("**Production Progress**")
-                st.progress(min(conn_progress / 100, 1.0))
-                st.markdown(f"<p style='text-align: center; color: #ff6b9d; font-weight: bold;'>{conn_progress:.1f}% Complete ({conn_summary_str[1]} / {conn_summary_str[0]})</p>", unsafe_allow_html=True)
-            
+                st.progress(min(pct / 100, 1.0))
+                st.markdown(
+                    f"<p style='text-align:center;color:#ff6b9d;font-weight:bold;'>"
+                    f"{pct:.1f}% Complete ({conn_str[1]} / {conn_str[0]})</p>",
+                    unsafe_allow_html=True)
+
             st.markdown("---")
-            
-            # Prepare data for charts
-            fg_values = []
-            conn_values = []
-            backlog_values = []
-            
-            for shift in filtered_shifts:
-                fg_val = shift_data['Production Output Finished Goods'][shift].replace(',', '')
-                conn_val = shift_data['Production Output Connectors'][shift].replace(',', '')
-                backlog_val = shift_data['Total Backlog Finished Goods'][shift].replace(',', '')
-                
-                fg_values.append(float(fg_val) if fg_val != '0' else 0)
-                conn_values.append(float(conn_val) if conn_val != '0' else 0)
-                backlog_values.append(float(backlog_val) if backlog_val != '0' else 0)
-            
-            # Create production chart based on selection
+
+            fg_v     = [float(shift_data['Production Output Finished Goods'][s].replace(',','')) for s in filtered_shifts]
+            conn_v   = [float(shift_data['Production Output Connectors'][s].replace(',',''))     for s in filtered_shifts]
+            backlog_v= [float(shift_data['Total Backlog Finished Goods'][s].replace(',',''))     for s in filtered_shifts]
+
             if chart_type == "Line Chart":
                 fig = go.Figure()
                 if 'Production Output Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=fg_values, name='Finished Goods',
-                                            mode='lines+markers', line=dict(color='#00ff9f', width=3)))
+                    fig.add_trace(go.Scatter(x=filtered_shifts, y=fg_v, name='Finished Goods',
+                                             mode='lines+markers', line=dict(color='#00ff9f', width=3)))
                 if 'Production Output Connectors' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=conn_values, name='Connectors',
-                                            mode='lines+markers', line=dict(color='#ff6b9d', width=3)))
+                    fig.add_trace(go.Scatter(x=filtered_shifts, y=conn_v, name='Connectors',
+                                             mode='lines+markers', line=dict(color='#ff6b9d', width=3)))
                 if 'Total Backlog Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=backlog_values, name='Backlog',
-                                            mode='lines+markers', line=dict(color='#ffa500', width=3)))
-            
+                    fig.add_trace(go.Scatter(x=filtered_shifts, y=backlog_v, name='Backlog',
+                                             mode='lines+markers', line=dict(color='#ffa500', width=3)))
+
             elif chart_type == "Bar Chart":
                 fig = go.Figure()
                 if 'Production Output Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Bar(x=filtered_shifts, y=fg_values, name='Finished Goods',
-                                        marker_color='#00ff9f'))
+                    fig.add_trace(go.Bar(x=filtered_shifts, y=fg_v,
+                                         name='Finished Goods', marker_color='#00ff9f'))
                 if 'Production Output Connectors' in selected_metrics:
-                    fig.add_trace(go.Bar(x=filtered_shifts, y=conn_values, name='Connectors',
-                                        marker_color='#ff6b9d'))
+                    fig.add_trace(go.Bar(x=filtered_shifts, y=conn_v,
+                                         name='Connectors', marker_color='#ff6b9d'))
                 if 'Total Backlog Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Bar(x=filtered_shifts, y=backlog_values, name='Backlog',
-                                        marker_color='#ffa500'))
+                    fig.add_trace(go.Bar(x=filtered_shifts, y=backlog_v,
+                                         name='Backlog', marker_color='#ffa500'))
                 fig.update_layout(barmode='group')
-            
+
             elif chart_type == "Area Chart":
                 fig = go.Figure()
                 if 'Production Output Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=fg_values, name='Finished Goods',
-                                            fill='tozeroy', line=dict(color='#00ff9f')))
+                    fig.add_trace(go.Scatter(x=filtered_shifts, y=fg_v, name='Finished Goods',
+                                             fill='tozeroy', line=dict(color='#00ff9f')))
                 if 'Production Output Connectors' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=conn_values, name='Connectors',
-                                            fill='tozeroy', line=dict(color='#ff6b9d')))
-            
+                    fig.add_trace(go.Scatter(x=filtered_shifts, y=conn_v, name='Connectors',
+                                             fill='tozeroy', line=dict(color='#ff6b9d')))
+
             else:  # Combined
                 fig = make_subplots(specs=[[{"secondary_y": True}]])
                 if 'Production Output Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Bar(x=filtered_shifts, y=fg_values, name='Finished Goods',
-                                        marker_color='#00ff9f'), secondary_y=False)
+                    fig.add_trace(go.Bar(x=filtered_shifts, y=fg_v,
+                                         name='Finished Goods', marker_color='#00ff9f'),
+                                  secondary_y=False)
                 if 'Production Output Connectors' in selected_metrics:
-                    fig.add_trace(go.Bar(x=filtered_shifts, y=conn_values, name='Connectors',
-                                        marker_color='#ff6b9d'), secondary_y=False)
+                    fig.add_trace(go.Bar(x=filtered_shifts, y=conn_v,
+                                         name='Connectors', marker_color='#ff6b9d'),
+                                  secondary_y=False)
                 if 'Total Backlog Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=backlog_values, name='Backlog',
-                                            mode='lines+markers', line=dict(color='#ffa500', width=3)),
-                                secondary_y=True)
-            
-            fig.update_layout(
-                template='plotly_dark',
-                height=500,
-                xaxis_title="Shifts",
-                yaxis_title="Quantity",
-                hovermode='x unified',
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            
+                    fig.add_trace(go.Scatter(x=filtered_shifts, y=backlog_v, name='Backlog',
+                                             mode='lines+markers',
+                                             line=dict(color='#ffa500', width=3)),
+                                  secondary_y=True)
+
+            fig.update_layout(template='plotly_dark', height=500,
+                              xaxis_title="Shifts", yaxis_title="Quantity",
+                              hovermode='x unified',
+                              legend=dict(orientation="h", yanchor="bottom",
+                                          y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig, use_container_width=True)
-            
-            # Additional comparison charts
-            col1, col2 = st.columns(2)
-            
-            with col1:
+
+            ch1, ch2 = st.columns(2)
+            with ch1:
                 st.markdown("#### 🎯 Production by Category")
-                total_fg_prod = sum(fg_values)
-                total_conn_prod = sum(conn_values)
-                
-                pie_fig = go.Figure(data=[go.Pie(
+                pie = go.Figure(data=[go.Pie(
                     labels=['Finished Goods', 'Connectors'],
-                    values=[total_fg_prod, total_conn_prod],
-                    hole=0.4,
-                    marker_colors=['#00ff9f', '#ff6b9d']
+                    values=[sum(fg_v), sum(conn_v)],
+                    hole=0.4, marker_colors=['#00ff9f','#ff6b9d']
                 )])
-                pie_fig.update_layout(template='plotly_dark', height=350)
-                st.plotly_chart(pie_fig, use_container_width=True)
-            
-            with col2:
+                pie.update_layout(template='plotly_dark', height=350)
+                st.plotly_chart(pie, use_container_width=True)
+            with ch2:
                 st.markdown("#### 📊 Cumulative Production")
-                cumulative_fg = [sum(fg_values[:i+1]) for i in range(len(fg_values))]
-                cumulative_conn = [sum(conn_values[:i+1]) for i in range(len(conn_values))]
-                
                 cum_fig = go.Figure()
-                cum_fig.add_trace(go.Scatter(x=filtered_shifts, y=cumulative_fg, name='Finished Goods',
-                                            fill='tozeroy', line=dict(color='#00ff9f')))
-                cum_fig.add_trace(go.Scatter(x=filtered_shifts, y=cumulative_conn, name='Connectors',
-                                            fill='tozeroy', line=dict(color='#ff6b9d')))
+                cum_fig.add_trace(go.Scatter(
+                    x=filtered_shifts,
+                    y=[sum(fg_v[:i+1]) for i in range(len(fg_v))],
+                    name='Finished Goods', fill='tozeroy', line=dict(color='#00ff9f')))
+                cum_fig.add_trace(go.Scatter(
+                    x=filtered_shifts,
+                    y=[sum(conn_v[:i+1]) for i in range(len(conn_v))],
+                    name='Connectors', fill='tozeroy', line=dict(color='#ff6b9d')))
                 cum_fig.update_layout(template='plotly_dark', height=350)
                 st.plotly_chart(cum_fig, use_container_width=True)
-        
+
         with tab2:
             st.subheader("⚡ Overall Efficiency Analysis")
-            
-            efficiency_values = []
-            efficiency_labels = []
-            
-            for shift in filtered_shifts:
-                eff_str = shift_data['Overall Efficiency'][shift]
-                if eff_str != '-':
-                    eff_val = float(eff_str.replace('%', ''))
-                    efficiency_values.append(eff_val)
-                    efficiency_labels.append(shift)
-            
+            eff_vals   = []
+            eff_labels = []
+            for s in filtered_shifts:
+                v = shift_data['Overall Efficiency'][s]
+                if v != '-':
+                    eff_vals.append(float(v.replace('%','')))
+                    eff_labels.append(s)
+
             eff_fig = go.Figure()
             eff_fig.add_trace(go.Scatter(
-                x=efficiency_labels, 
-                y=efficiency_values,
-                mode='lines+markers',
+                x=eff_labels, y=eff_vals, mode='lines+markers',
                 name='Efficiency %',
                 line=dict(color='#00d4ff', width=4),
                 marker=dict(size=10, symbol='diamond'),
-                fill='tozeroy',
-                fillcolor='rgba(0, 212, 255, 0.2)'
+                fill='tozeroy', fillcolor='rgba(0,212,255,0.2)'
             ))
-            
-            eff_fig.add_hline(y=100, line_dash="dash", line_color="green", 
-                             annotation_text="Target: 100%")
-            
-            eff_fig.update_layout(
-                template='plotly_dark',
-                height=400,
-                xaxis_title="Shifts",
-                yaxis_title="Efficiency %",
-                hovermode='x unified'
-            )
-            
+            eff_fig.add_hline(y=100, line_dash="dash", line_color="green",
+                              annotation_text="Target: 100%")
+            eff_fig.update_layout(template='plotly_dark', height=400,
+                                   xaxis_title="Shifts", yaxis_title="Efficiency %",
+                                   hovermode='x unified')
             st.plotly_chart(eff_fig, use_container_width=True)
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            if efficiency_values:
-                with col1:
-                    st.metric("Average Efficiency", f"{sum(efficiency_values)/len(efficiency_values):.2f}%")
-                with col2:
-                    st.metric("Maximum Efficiency", f"{max(efficiency_values):.2f}%")
-                with col3:
-                    st.metric("Minimum Efficiency", f"{min(efficiency_values):.2f}%")
-                with col4:
-                    above_target = sum(1 for e in efficiency_values if e >= 100)
-                    st.metric("Shifts ≥100%", f"{above_target}/{len(efficiency_values)}")
-            
+
+            if eff_vals:
+                e1, e2, e3, e4 = st.columns(4)
+                e1.metric("Average Efficiency", f"{sum(eff_vals)/len(eff_vals):.2f}%")
+                e2.metric("Maximum Efficiency", f"{max(eff_vals):.2f}%")
+                e3.metric("Minimum Efficiency", f"{min(eff_vals):.2f}%")
+                e4.metric("Shifts ≥100%",
+                           f"{sum(1 for e in eff_vals if e>=100)}/{len(eff_vals)}")
+
             st.markdown("#### 📊 Efficiency Distribution")
-            hist_fig = go.Figure(data=[go.Histogram(
-                x=efficiency_values,
-                nbinsx=10,
-                marker_color='#00d4ff',
-                opacity=0.75
-            )])
-            hist_fig.update_layout(
-                template='plotly_dark',
-                height=300,
-                xaxis_title="Efficiency %",
-                yaxis_title="Frequency"
-            )
-            st.plotly_chart(hist_fig, use_container_width=True)
-        
+            hist = go.Figure(data=[go.Histogram(x=eff_vals, nbinsx=10,
+                                                 marker_color='#00d4ff', opacity=0.75)])
+            hist.update_layout(template='plotly_dark', height=300,
+                                xaxis_title="Efficiency %", yaxis_title="Frequency")
+            st.plotly_chart(hist, use_container_width=True)
+
         with tab3:
             st.subheader("📋 Detailed Data Tables")
-            st.markdown("#### Shift-wise Production & Efficiency")
-            
             filtered_df = df_shift[filtered_shifts].copy()
-            
             if selected_metrics:
-                available_metrics = [metric for metric in selected_metrics if metric in filtered_df.index]
-                if available_metrics:
-                    filtered_df = filtered_df.loc[available_metrics]
-            
+                avail = [m for m in selected_metrics if m in filtered_df.index]
+                if avail:
+                    filtered_df = filtered_df.loc[avail]
             st.dataframe(filtered_df, use_container_width=True, height=400)
-        
+
         with tab4:
             st.subheader("📥 Download Options")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
+            d1, d2 = st.columns(2)
+            with d1:
                 st.markdown("#### Full Shift-wise Data")
-                csv_data = df_shift.to_csv(index=True)
-                st.download_button(
-                    label="📥 Download Full Dataset (CSV)",
-                    data=csv_data,
-                    file_name="shiftwise_production_data.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            
-            with col2:
+                st.download_button("📥 Download Full Dataset (CSV)",
+                                   data=df_shift.to_csv(index=True),
+                                   file_name="shiftwise_production_data.csv",
+                                   mime="text/csv", use_container_width=True)
+            with d2:
                 st.markdown("#### Summary Report")
-                csv_summary = df_summary.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Summary (CSV)",
-                    data=csv_summary,
-                    file_name="production_summary.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            
+                st.download_button("📥 Download Summary (CSV)",
+                                   data=df_summary.to_csv(index=False),
+                                   file_name="production_summary.csv",
+                                   mime="text/csv", use_container_width=True)
             st.markdown("---")
             st.markdown("#### Filtered Data")
-            filtered_csv = filtered_df.to_csv(index=True)
-            st.download_button(
-                label="📥 Download Filtered Data (CSV)",
-                data=filtered_csv,
-                file_name="filtered_production_data.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-
+            st.download_button("📥 Download Filtered Data (CSV)",
+                               data=filtered_df.to_csv(index=True),
+                               file_name="filtered_production_data.csv",
+                               mime="text/csv", use_container_width=True)
     else:
         st.markdown("""
         ### 👋 Welcome to Production Analytics Dashboard
-        
         Upload your CSV file and configure the analysis parameters in the sidebar to get started.
-        
+
         **Features:**
         - 📊 Production output tracking for Finished Goods and Connectors
         - ⚡ Efficiency analysis across shifts
@@ -1196,826 +761,1523 @@ if page == "📊 Production Analytics":
         - 📥 Export capabilities for reports
         """)
 
-# ==================== PAGE 2: Schedule Management (WITH ASYNC SUPPORT) ====================
+
+# ===========================================================================
+# PAGE 2 – Schedule Management
+# ===========================================================================
+
 elif page == "📅 Schedule Management":
-    st.markdown('<div class="main-header">🏭 Production Schedule Dashboard</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Optimized Machine Time Allocation (Now with Async Support!)</div>', unsafe_allow_html=True)
-    
-    # Sidebar
-    st.sidebar.title("⚙️ Controls")
+    st.title("📅 Schedule Management")
 
-    st.sidebar.subheader("📁 Data Initialization")
-    
-    with st.sidebar.expander("📤 Upload Data Files", expanded=True):
-        st.markdown("**Upload your data files (CSV or XLSX):**")
-        
-        frontpage_file = st.file_uploader(
-            "Frontpage File",
-            type=['csv', 'xlsx', 'xls'],
-            help="Upload the frontpage file (CSV or XLSX) containing product demand data",
-            key="frontpage"
-        )
-        
-        process_file = st.file_uploader(
-            "Process File",
-            type=['csv', 'xlsx', 'xls'],
-            help="Upload the process file (CSV or XLSX) containing routing and machine data",
-            key="process"
-        )
-        
-        # Async mode toggle for initialization
-        init_async_mode = st.checkbox(
-            "🚀 Use Async Mode (Recommended for large datasets)",
-            value=True,
-            key="init_async",
-            help="Process in background - no waiting!"
-        )
-        
-        if st.button("🔄 Initialize Database", use_container_width=True):
-            if frontpage_file is None or process_file is None:
-                st.error("⚠️ Please upload both files before initializing!")
-            else:
-                # Get file extensions
-                frontpage_ext = os.path.splitext(frontpage_file.name)[1]
-                process_ext = os.path.splitext(process_file.name)[1]
-                
-                files = {
-                    'frontpage': (frontpage_file.name, frontpage_file.getvalue(), 
-                                'text/csv' if frontpage_ext == '.csv' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
-                    'process': (process_file.name, process_file.getvalue(), 
-                            'text/csv' if process_ext == '.csv' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-                }
-                data_dict = {
-                    'async_mode': 'true' if init_async_mode else 'false'
-                }
-                
-                result = post_files("initialize-data", files, data_dict)
-                
-                if result:
-                    if init_async_mode and 'task_id' in result:
-                        st.session_state.async_task_id = result['task_id']
-                        st.success(f"✅ Initialization started! Task ID: {result['task_id']}")
-                        
-                        # Show progress
-                        init_result = display_async_progress(result['task_id'], "Database Initialization")
-                        
-                        if init_result:
-                            # Handle both nested result structure and direct structure
-                            if 'result' in init_result:
-                                actual_result = init_result['result']
-                            else:
-                                actual_result = init_result
-                            
-                            # Safe get with defaults
-                            message = actual_result.get('message', 'Initialization completed')
-                            products_created = actual_result.get('products_created', 0)
-                            machines_created = actual_result.get('machines_created', 0)
-                            process_steps_created = actual_result.get('process_steps_created', 0)
-                            
-                            st.success(f"✅ {message}")
-                            st.info(f"""
-                            **Created:**
-                            - {products_created} Products
-                            - {machines_created} Machines
-                            - {process_steps_created} Process Steps
-                            """)
-                            st.rerun()
-                    else:
-                        # Sync mode response
-                        message = result.get('message', 'Initialization completed')
-                        products_created = result.get('products_created', 0)
-                        machines_created = result.get('machines_created', 0)
-                        process_steps_created = result.get('process_steps_created', 0)
-                        
-                        st.success(f"✅ {message}")
-                        st.info(f"""
-                        **Created:**
-                        - {products_created} Products
-                        - {machines_created} Machines
-                        - {process_steps_created} Process Steps
-                        """)
-                        st.rerun()
-        
-        # Display uploaded file info with file type
-        if frontpage_file:
-            file_type = "XLSX" if frontpage_file.name.endswith(('.xlsx', '.xls')) else "CSV"
-            st.success(f"✓ Frontpage: {frontpage_file.name} ({file_type})")
-        if process_file:
-            file_type = "XLSX" if process_file.name.endswith(('.xlsx', '.xls')) else "CSV"
-            st.success(f"✓ Process: {process_file.name} ({file_type})")        
-    st.sidebar.markdown("---")
-    
-    # Schedule Generation with Async Support
-    st.sidebar.subheader("📅 Schedule Generation")
-    
-    with st.sidebar.expander("⚙️ Generation Settings", expanded=True):
-        # Async mode toggle
-        # schedule_async_mode = st.checkbox(
-        #     "🚀 Use Async Mode",
-        #     value=True,
-        #     key="schedule_async",
-        #     help="Generate schedule in background - instant response!"
-        # )
-        schedule_async_mode = True
-        # Advanced settings
-        # use_pulp_scheduler = st.selectbox(
-        #     "Scheduling Method",
-        #     ["Auto (Recommended)", "Force PuLP Optimizer", "Force Greedy Heuristic"],
-        #     help="Auto selects best method based on problem size"
-        # )
-        use_pulp_scheduler = "Force PuLP Optimizer"
-        # time_limit = st.slider(
-        #     "PuLP Timeout (seconds)",
-        #     min_value=10,
-        #     max_value=300,
-        #     value=60,
-        #     help="Maximum time for PuLP solver"
-        # )
-        time_limit = 120
-        if st.button("📅 Generate Schedule", use_container_width=True, type="primary"):
-            # Map selection to API value
-            scheduler_map = {
-                "Auto (Recommended)": None,
-                "Force PuLP Optimizer": True,
-                "Force Greedy Heuristic": False
-            }
-            
-            schedule_data = {
-                "async_mode": schedule_async_mode,
-                "use_pulp_scheduler": scheduler_map[use_pulp_scheduler],
-                "time_limit": time_limit
-            }
-            
-            result = post_data("generate-schedule", schedule_data)
-            
-            if result:
-                if schedule_async_mode and 'task_id' in result:
-                    st.session_state.async_task_id = result['task_id']
-                    st.success(f"✅ Schedule generation started! Task ID: {result['task_id']}")
-                    
-                    # Show progress
-                    schedule_result = display_async_progress(result['task_id'], "Schedule Generation")
-                    
-                    if schedule_result:
-                        st.success(f"✅ {schedule_result['message']}")
-                        st.info(f"""
-                        **Schedule Info:**
-                        - Method: {schedule_result.get('scheduling_method', 'N/A')}
-                        - Operations: {schedule_result.get('schedule_count', 0)}
-                        - Products Optimized: {schedule_result.get('batch_optimization', {}).get('products_optimized', 0)}
-                        """)
-                        st.rerun()
-                else:
-                    st.success(f"✅ {result['message']}")
-                    st.rerun()
+    tab_gen, tab_gantt, tab_timeline, tab_table, tab_kpi, tab_compare, tab_optimize = st.tabs([
+        "⚙️ Generate Schedule",
+        "📊 Gantt Chart",
+        "🕐 Timeline View",
+        "📋 Schedule Table",
+        "📈 KPIs",
+        "🔄 Comparison",
+        "🎯 Gap Optimizer",
+    ])
 
-    st.sidebar.markdown("---")
-    
-    # Batch Size Optimization Section
-    st.sidebar.subheader("📦 Batch Size Optimization")
-    
-    with st.sidebar.expander("⚙️ Configure Batch Parameters", expanded=False):
-        st.markdown("**Adjust batch size constraints:**")
-        
-        max_num_batches = st.number_input(
-            "Max Number of Batches",
-            min_value=1,
-            max_value=50,
-            value=25,
-            step=1,
-            help="Maximum number of batches allowed per product"
-        )
-        
-        min_batch_size = st.number_input(
-            "Min Batch Size (units)",
-            min_value=10,
-            max_value=200,
-            value=50,
-            step=10,
-            help="Minimum size per batch"
-        )
-        
-        max_batch_size = st.number_input(
-            "Max Batch Size (units)",
-            min_value=100,
-            max_value=1000,
-            value=500,
-            step=50,
-            help="Maximum size per batch"
-        )
-        
-        # Async toggle for batch preview
-        batch_async_mode = st.checkbox(
-            "🚀 Use Async for Preview",
-            value=False,
-            key="batch_async",
-            help="Use async mode for large datasets (100+ products)"
-        )
-        
-        if st.button("🔍 Preview Optimization", use_container_width=True):
-            params = {
-                'max_num_batches': max_num_batches,
-                'min_batch_size': min_batch_size,
-                'max_batch_size': max_batch_size,
-                'async_mode': 'true' if batch_async_mode else 'false'
-            }
-            
-            batch_preview = fetch_data("batch-optimization-preview", params)
-            
-            if batch_preview:
-                if batch_async_mode and 'task_id' in batch_preview:
-                    st.success(f"✅ Batch optimization started! Task ID: {batch_preview['task_id']}")
-                    
-                    # Show progress
-                    batch_result = display_async_progress(batch_preview['task_id'], "Batch Optimization Preview")
-                    
-                    if batch_result:
-                        st.session_state['batch_preview'] = batch_result
-                        st.success("✅ Optimization preview ready!")
-                else:
-                    st.session_state['batch_preview'] = batch_preview
-                    st.success("✅ Optimization preview ready!")
+    # ── TAB 1 – Generate ──────────────────────────────────────────────
+    with tab_gen:
+        st.subheader("⚙️ Generate Production Schedule")
+        st.markdown("""
+        <div style='background:#1a2a3a;border-left:4px solid #4facfe;
+                    padding:14px 18px;border-radius:6px;margin-bottom:18px;'>
+        <b style='color:#4facfe'>ℹ️ How it works</b><br>
+        <span style='color:#ccc'>
+        The scheduler uses a <b>Hybrid Heuristic + PuLP MILP</b> approach:<br>
+        &nbsp; 1. <b>Phase 1</b> — Greedy SPT dispatcher builds a full feasible
+                schedule in seconds.<br>
+        &nbsp; 2. <b>Phase 2</b> — PuLP re-optimises the most loaded bottleneck
+                machines to minimise makespan. Runs async via Celery.
+        </span></div>""", unsafe_allow_html=True)
 
-    # Filters
-    st.sidebar.subheader("🔍 Filters")
-    
-    filter_options = fetch_data("get-filter-options")
-    
-    if filter_options:
-        machines = ['All'] + filter_options.get('machines', [])
-        selected_machine_sched = st.sidebar.selectbox("Select Machine(s)", machines)
-        
-        products = filter_options.get('products', [])
-        product_options = ['All'] + [f"Item {p['item']}: {p['description'][:30]}..." for p in products]
-        selected_product_sched = st.sidebar.selectbox("Select Product", product_options)
-        
-        date_range = filter_options.get('date_range', {})
-        if date_range.get('min') and date_range.get('max'):
-            min_date = pd.to_datetime(date_range['min']).date()
-            max_date = pd.to_datetime(date_range['max']).date()
-            
-            st.sidebar.subheader("📆 Time Range")
-            start_date = st.sidebar.date_input("Start Date", min_date, min_value=min_date, max_value=max_date)
-            end_date = st.sidebar.date_input("End Date", max_date, min_value=min_date, max_value=max_date)
-        else:
-            start_date = None
-            end_date = None
-    else:
-        selected_machine_sched = 'All'
-        selected_product_sched = 'All'
-        start_date = None
-        end_date = None
-    
-    st.sidebar.markdown("---")
-    
-    # Timeline settings
-    st.sidebar.subheader("⏱️ Timeline View Settings")
-    time_interval_minutes = st.sidebar.slider("Time Interval (minutes)", 1, 120, 5, step=1)
-    
-    # Display Batch Optimization Preview if available
-    if 'batch_preview' in st.session_state:
-        st.markdown("---")
-        st.subheader("📦 Batch Size Optimization Preview")
-        
-        batch_data = st.session_state['batch_preview']
-        
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.markdown(f"""
-                <div class="kpi-card">
-                    <div class="kpi-value">{batch_data['summary']['total_batches']}</div>
-                    <div class="kpi-label">Total Batches</div>
-                </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown(f"""
-                <div class="kpi-card">
-                    <div class="kpi-value">{batch_data['summary']['avg_batch_size']:.0f}</div>
-                    <div class="kpi-label">Avg Batch Size</div>
-                </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown(f"""
-                <div class="kpi-card">
-                    <div class="kpi-value">{batch_data['summary']['min_batch_size']}-{batch_data['summary']['max_batch_size']}</div>
-                    <div class="kpi-label">Batch Size Range</div>
-                </div>
-            """, unsafe_allow_html=True)
-        
-        with col4:
-            st.markdown(f"""
-                <div class="kpi-card">
-                    <div class="kpi-value">{batch_data['summary']['total_demand']:,}</div>
-                    <div class="kpi-label">Total Demand</div>
-                </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # Batch comparison chart
-        st.subheader("📊 Batch Count Comparison")
-        batch_chart = create_batch_comparison_chart(batch_data['batch_analysis'])
-        if batch_chart:
-            st.plotly_chart(batch_chart, use_container_width=True)
-        
-        # Detailed batch analysis table
-        st.subheader("📋 Detailed Batch Analysis")
-        
-        df_batch = pd.DataFrame(batch_data['batch_analysis'])
-        df_batch_display = df_batch[[
-            'item', 'description', 'demand',
-            'old_batch_size', 'old_num_batches',
-            'new_batch_size', 'new_num_batches',
-            'ideal_batch_size', 'improvement'
-        ]].copy()
-        
-        df_batch_display.columns = [
-            'Item', 'Description', 'Demand',
-            'Old Batch Size', 'Old Batches',
-            'New Batch Size', 'New Batches',
-            'Ideal Size', 'Improvement'
-        ]
-        
-        st.dataframe(df_batch_display, use_container_width=True, height=400)
-        
-        # Download batch analysis
-        csv_batch = df_batch_display.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Batch Analysis CSV",
-            data=csv_batch,
-            file_name=f"batch_optimization_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
-        
-        # Info box with parameters
-        st.info(f"""
-        **Current Parameters:**
-        - Max Batches: {batch_data['parameters']['max_num_batches']}
-        - Min Batch Size: {batch_data['parameters']['min_batch_size']} units
-        - Max Batch Size: {batch_data['parameters']['max_batch_size']} units
-        
-        💡 The optimization algorithm uses **PuLP Linear Programming** to minimize the number of batches 
-        while respecting min/max constraints and ensuring full demand coverage.
-        """)
-        
-        st.markdown("---")
-    
-    # Fetch schedule data
-    params = {}
-    if selected_machine_sched != 'All':
-        params['machine'] = selected_machine_sched
-    if selected_product_sched != 'All':
-        product_item = int(selected_product_sched.split(':')[0].replace('Item ', ''))
-        params['product'] = product_item
-    
-    schedule_data = fetch_data("schedule", params)
-    kpi_data = fetch_data("kpis")
-    
-    if not schedule_data or not schedule_data.get('schedules'):
-        st.warning("⚠️ No schedule data available. Please initialize data and generate schedule.")
-    else:
-        df_schedule = pd.DataFrame(schedule_data['schedules'])
-        
-        # KPIs Section
-        st.subheader("📊 Key Performance Indicators")
-        
-        if kpi_data:
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.markdown(f"""
-                    <div class="kpi-card">
-                        <div class="kpi-value">{kpi_data.get('total_makespan_days', 0):.1f}</div>
-                        <div class="kpi-label">Total Makespan (Days)</div>
-                    </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                machine_util = kpi_data.get('machine_utilization', [])
-                avg_utilization = sum([m['utilization'] for m in machine_util]) / max(len(machine_util), 1)
-                st.markdown(f"""
-                    <div class="kpi-card">
-                        <div class="kpi-value">{avg_utilization:.1f}%</div>
-                        <div class="kpi-label">Avg Machine Utilization</div>
-                    </div>
-                """, unsafe_allow_html=True)
-            
-            with col3:
-                st.markdown(f"""
-                    <div class="kpi-card">
-                        <div class="kpi-value">{kpi_data.get('total_operations', 0)}</div>
-                        <div class="kpi-label">Number of Operations</div>
-                    </div>
-                """, unsafe_allow_html=True)
-            
-            with col4:
-                st.markdown(f"""
-                    <div class="kpi-card">
-                        <div class="kpi-value">{kpi_data.get('throughput_units_per_day', 0):.0f}</div>
-                        <div class="kpi-label">Throughput (units/day)</div>
-                    </div>
-                """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # Tabs for different views
-        tab1, tab2, tab3, tab4 = st.tabs(["📅 Timeline View", "📈 Gantt Chart", "📋 Table View", "🔧 Machine Details"])
-        
-        with tab1:
-            st.subheader("Production Timeline Schedule")
-            
-            if start_date and end_date:
-                timeline_start = datetime.combine(start_date, datetime.min.time())
-                timeline_end = datetime.combine(end_date, datetime.max.time())
-            else:
-                timeline_start = pd.to_datetime(df_schedule['start_time']).min()
-                timeline_end = pd.to_datetime(df_schedule['end_time']).max()
-            
-            timeline_html = generate_timeline_html(df_schedule, timeline_start, timeline_end, time_interval_minutes)
-            components.html(timeline_html, height=800, scrolling=True)
-            
-            st.info("💡 Hover over cards to see full details. Scroll horizontally to view the entire timeline.")
-        
-        with tab2:
-            st.subheader("Production Schedule Gantt Chart")
-            gantt_fig = create_gantt_chart(df_schedule)
-            if gantt_fig:
-                st.plotly_chart(gantt_fig, use_container_width=True)
-            else:
-                st.info("No data available for Gantt chart")
-        
-        with tab3:
-            st.subheader("Schedule Table View")
-            
-            display_cols = [
-                'machine_name', 'product_item', 'product_sap_tn', 'product_dcc_type',
-                'batch_id', 'step_number', 'step_name', 'workers_required',
-                'start_time', 'end_time', 'duration_hours'
-            ]
-            
-            df_display = df_schedule[display_cols].copy()
-            df_display['start_time'] = pd.to_datetime(df_display['start_time']).dt.strftime('%Y-%m-%d %H:%M')
-            df_display['end_time'] = pd.to_datetime(df_display['end_time']).dt.strftime('%Y-%m-%d %H:%M')
-            
-            df_display.columns = [
-                'Machine', 'Item', 'SAP TN', 'DCC Type', 'Batch ID',
-                'Step', 'Step Name', 'Workers', 'Start Time', 'End Time', 'Duration (h)'
-            ]
-            
-            st.dataframe(df_display, use_container_width=True, height=600)
-            
-            csv = df_display.to_csv(index=False)
-            st.download_button(
-                label="📥 Download Schedule CSV",
-                data=csv,
-                file_name=f"production_schedule_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
+        g1, g2, g3, g4 = st.columns(4)
+        with g1:
+            start_date = st.date_input("📅 Schedule Start Date", value=date.today(),
+                                        help="All operations are anchored from this date.")
+        with g2:
+            local_opt = st.slider("🔧 Bottleneck Machines to Re-optimise",
+                                   min_value=0, max_value=15, value=5,
+                                   help="Higher = better quality, slower solve.")
+        with g3:
+            clear_existing = st.checkbox("🗑️ Clear existing schedule before saving",
+                                          value=True)
+        with g4:
+            enable_compaction = st.checkbox(
+                "🔀 Enable Gap Elimination",
+                value=True,
+                help=(
+                    "Runs Left-Shift Compaction after greedy dispatch. "
+                    "Slides every operation as early as possible (respecting "
+                    "precedence + no overlap) to eliminate idle gaps. "
+                    "Recommended: ✅ ON"
+                )
             )
-        
-        with tab4:
-            st.subheader("Machine Utilization Details")
-            
-            if kpi_data and kpi_data.get('machine_utilization'):
-                util_fig = create_machine_utilization_chart(kpi_data['machine_utilization'])
-                if util_fig:
-                    st.plotly_chart(util_fig, use_container_width=True)
-                
-                st.subheader("Machine Statistics")
-                machine_stats_df = pd.DataFrame(kpi_data['machine_utilization'])
-                machine_stats_df.columns = ['Machine', 'Used Hours', 'Utilization (%)', 'Num Operations']
-                st.dataframe(machine_stats_df, use_container_width=True)
-            else:
-                st.info("No machine statistics available")
-        
-        # Footer
-        st.markdown("---")
-        st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Total schedules: {len(df_schedule)}")
 
-# ==================== PAGE 3: Buffer Optimization ====================
+        if enable_compaction:
+            st.markdown(
+                "<div style='background:#0d2a0d;border-left:3px solid #22c55e;"
+                "padding:8px 14px;border-radius:4px;font-size:12px;color:#86efac;'>"
+                "✅ <b>Gap Elimination ON</b> — Left-Shift Compaction will run after "
+                "greedy dispatch, sliding every operation left to fill idle gaps "
+                "without breaking precedence constraints."
+                "</div>",
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                "<div style='background:#2a1a0d;border-left:3px solid #f59e0b;"
+                "padding:8px 14px;border-radius:4px;font-size:12px;color:#fcd34d;'>"
+                "⚠️ <b>Gap Elimination OFF</b> — Greedy-only schedule will have idle "
+                "gaps. Enable this for continuous machine utilisation."
+                "</div>",
+                unsafe_allow_html=True
+            )
+
+        st.markdown("---")
+
+        with st.expander("🔬 Advanced Options — Per-product batch override"):
+            st.markdown("Leave empty to use batch sizes already stored in the database.")
+            try:
+                pr = requests.get(f"{API_BASE_URL}/get-filter-options/", timeout=10)
+                products_list = pr.json().get('products', []) if pr.ok else []
+            except Exception:
+                products_list = []
+
+            if products_list:
+                ov_prod = st.selectbox(
+                    "Select product to override",
+                    ["— none —"] + [f"{p['item']} – {p['description'][:40]}"
+                                    for p in products_list]
+                )
+                if ov_prod != "— none —":
+                    ov1, ov2 = st.columns(2)
+                    ov_bs = ov1.number_input("Batch size",   min_value=1, value=100)
+                    ov_nb = ov2.number_input("Num batches",  min_value=1, value=12)
+                    if st.button("➕ Add Override"):
+                        item_no = int(ov_prod.split(" – ")[0])
+                        pk = next((p['item'] for p in products_list
+                                   if p['item'] == item_no), None)
+                        if pk:
+                            st.session_state.batch_overrides.append([pk, ov_bs, ov_nb])
+                            st.success(f"Override added for product {item_no}.")
+
+            if st.session_state.batch_overrides:
+                st.markdown(f"**Active overrides:** {len(st.session_state.batch_overrides)}")
+                if st.button("🗑 Clear all overrides"):
+                    st.session_state.batch_overrides = []
+
+        st.markdown("---")
+        btn1, btn2 = st.columns([2, 1])
+
+        with btn1:
+            gen_clicked = st.button("🚀 Generate Schedule (Async)",
+                                     type="primary", use_container_width=True)
+        with btn2:
+            try:
+                ex = requests.get(f"{API_BASE_URL}/get-schedule/?page_size=1", timeout=5)
+                if ex.ok and ex.json().get('count', 0) > 0:
+                    st.metric("Current schedule ops", ex.json()['count'])
+            except Exception:
+                pass
+
+        if gen_clicked:
+            payload = {
+                'start_date':         start_date.isoformat(),
+                'local_opt_machines': local_opt,
+                'clear_existing':     clear_existing,
+                'enable_compaction':  enable_compaction,   # ← gap elimination flag
+                'batch_overrides':    st.session_state.batch_overrides,
+                'async_mode':         True,
+            }
+            with st.spinner("Submitting job to Celery…"):
+                try:
+                    r = requests.post(f"{API_BASE_URL}/generate-schedule/",
+                                      json=payload, timeout=30)
+                    if r.status_code in (200, 201, 202):
+                        task_id = r.json().get('task_id')
+                        if task_id:
+                            st.session_state.schedule_task_id   = task_id
+                            st.session_state.schedule_task_done = False
+                            st.success(f"✅ Task submitted — ID: `{task_id}`")
+                        else:
+                            st.success("Schedule generated (sync).")
+                    else:
+                        st.error(f"Error {r.status_code}: {r.text}")
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
+
+        task_id = st.session_state.get('schedule_task_id')
+        if task_id and not st.session_state.get('schedule_task_done', False):
+            st.markdown("---")
+            st.markdown("### ⏳ Schedule Generation Progress")
+            _render_task_progress(task_id, API_BASE_URL)
+
+    # ── TAB 2 – Gantt ─────────────────────────────────────────────────
+    with tab_gantt:
+        st.subheader("📊 Gantt Chart")
+
+        gc1, gc2, gc3 = st.columns([2, 1, 1])
+        with gc1:
+            try:
+                mr = requests.get(f"{API_BASE_URL}/get-filter-options/", timeout=10)
+                all_machines = mr.json().get('machines', []) if mr.ok else []
+            except Exception:
+                all_machines = []
+            sel_machines = st.multiselect("Filter Machines", options=all_machines,
+                                           default=[], placeholder="All machines")
+        with gc2:
+            max_bars = st.number_input("Max bars to render",
+                                        min_value=50, max_value=2000, value=500, step=50)
+        with gc3:
+            chart_h = st.number_input("Chart height (px)",
+                                       min_value=400, max_value=2000, value=700, step=50)
+
+        if st.button("🔄 Load / Refresh Gantt", type="primary"):
+            params = {'max_bars': max_bars}
+            if sel_machines:
+                params['machines'] = ','.join(sel_machines)
+            with st.spinner("Fetching Gantt data…"):
+                try:
+                    r = requests.get(f"{API_BASE_URL}/schedule-gantt/",
+                                     params=params, timeout=30)
+                    if r.ok:
+                        st.session_state.gantt_data = r.json()
+                    else:
+                        st.error(f"Error {r.status_code}: {r.text}")
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
+
+        gd = st.session_state.get('gantt_data')
+        if gd:
+            total = gd.get('total_bars', 0)
+            shown = len(gd.get('gantt_bars', []))
+            if gd.get('truncated'):
+                st.warning(f"⚠️ Showing {shown:,} of {total:,} operations. "
+                           "Filter by machine to see more detail.")
+
+            dr = gd.get('date_range', {})
+            if dr.get('start') and dr.get('end'):
+                d0 = _parse_iso(dr['start'])
+                d1 = _parse_iso(dr['end'])
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Makespan", f"{(d1-d0).total_seconds()/3600:.1f} h")
+                m2.metric("Machines", len(gd.get('machines', [])))
+                m3.metric("Operations shown", f"{shown:,}")
+
+            st.plotly_chart(build_gantt_figure(gd, height=chart_h),
+                            use_container_width=True)
+
+            st.markdown("#### 🏭 Machine Load Summary")
+            bars_df = pd.DataFrame(gd['gantt_bars'])
+            if not bars_df.empty:
+                load_df = (bars_df.groupby('machine')['duration_h'].sum()
+                           .reindex(gd.get('machines', [])).reset_index()
+                           .rename(columns={'duration_h': 'Total Load (h)'}))
+                lf = px.bar(load_df, x='machine', y='Total Load (h)',
+                             color='Total Load (h)', color_continuous_scale='Blues',
+                             title="Total Machine Load (hours)", template='plotly_dark')
+                lf.update_layout(height=350, showlegend=False)
+                st.plotly_chart(lf, use_container_width=True)
+        else:
+            st.info("Click **Load / Refresh Gantt** to fetch schedule data.")
+
+    # ── TAB 3 – Timeline View ──────────────────────────────────────────
+    with tab_timeline:
+        st.subheader("🕐 Timeline View")
+        st.markdown("Visual step-by-step schedule per machine — mirrors the Production Schedule Dashboard layout.")
+
+        # ── Controls ─────────────────────────────────────────────────
+        tl1, tl2, tl3, tl4 = st.columns([2, 1, 1, 1])
+        with tl1:
+            try:
+                mr2 = requests.get(f"{API_BASE_URL}/get-filter-options/", timeout=10)
+                tl_machines = mr2.json().get('machines', []) if mr2.ok else []
+            except Exception:
+                tl_machines = []
+            sel_tl_machines = st.multiselect(
+                "Select Machine(s)", options=tl_machines,
+                default=tl_machines[:6] if tl_machines else [],
+                placeholder="Pick machines to display"
+            )
+        with tl2:
+            tl_time_start = st.text_input("Time range start (HH:MM)", value="08:00")
+        with tl3:
+            tl_time_end   = st.text_input("Time range end  (HH:MM)", value="20:00")
+        with tl4:
+            tl_opt_goal   = st.radio("Optimisation Goal",
+                                      ["Minimize Makespan", "Maximize Throughput"],
+                                      index=0)
+
+        if st.button("🔄 Load Timeline", type="primary"):
+            # Use get-schedule endpoint (always available) with gantt format
+            # Fall back gracefully if schedule-gantt is registered
+            params = {'max_bars': 2000, 'page_size': 2000, 'format': 'gantt'}
+            if sel_tl_machines:
+                params['machines'] = ','.join(sel_tl_machines)
+            with st.spinner("Loading timeline data…"):
+                loaded = False
+                # Try schedule-gantt first
+                try:
+                    r = requests.get(f"{API_BASE_URL}/schedule-gantt/",
+                                     params=params, timeout=30)
+                    if r.ok:
+                        st.session_state.timeline_data = r.json()
+                        loaded = True
+                except Exception:
+                    pass
+
+                # Fallback: build gantt-compatible payload from get-schedule
+                if not loaded:
+                    try:
+                        r2 = requests.get(f"{API_BASE_URL}/get-schedule/",
+                                          params={'page_size': 2000, 'format': 'gantt'},
+                                          timeout=30)
+                        if r2.ok:
+                            raw   = r2.json()
+                            rows  = raw.get('results', [])
+                            # Build colour_key map by product
+                            prods = sorted(set(row['product'] for row in rows))
+                            cmap  = {p: i for i, p in enumerate(prods)}
+                            # Attach color_key and ensure fields match gantt schema
+                            for row in rows:
+                                row['color_key'] = cmap.get(row['product'], 0)
+                                row['batch_num'] = row.get('batch_num', 1)
+                                row['batch_id']  = row.get('batch_id', '')
+                            # Compute date range
+                            starts = [row['start'] for row in rows if row.get('start')]
+                            ends   = [row['end']   for row in rows if row.get('end')]
+                            st.session_state.timeline_data = {
+                                'gantt_bars':  rows,
+                                'machines':    [r2.get('machine','') for r2 in rows],
+                                'date_range':  {
+                                    'start': min(starts) if starts else None,
+                                    'end':   max(ends)   if ends   else None,
+                                },
+                                'total_bars': len(rows),
+                                'truncated':  False,
+                            }
+                            # Deduplicate machines, preserve order
+                            seen_m = set()
+                            machine_list = []
+                            for row in rows:
+                                m = row.get('machine', '')
+                                if m and m not in seen_m:
+                                    seen_m.add(m)
+                                    machine_list.append(m)
+                            st.session_state.timeline_data['machines'] = machine_list
+                            loaded = True
+                        else:
+                            st.error(f"Error {r2.status_code}: {r2.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+
+        td = st.session_state.get('timeline_data') or st.session_state.get('gantt_data')
+
+        if td and td.get('gantt_bars'):
+            bars_all  = td['gantt_bars']
+            machines  = sel_tl_machines if sel_tl_machines else td.get('machines', [])
+
+            # Filter to selected machines
+            bars_all = [b for b in bars_all if not sel_tl_machines or b['machine'] in sel_tl_machines]
+
+            if not bars_all:
+                st.info("No operations found for selected machines.")
+            else:
+                # ── Compute timeline window ───────────────────────────
+                all_starts = [_parse_iso(b['start']) for b in bars_all]
+                all_ends   = [_parse_iso(b['end'])   for b in bars_all]
+                t_min      = min(all_starts)
+                t_max      = max(all_ends)
+                span_hrs   = max((t_max - t_min).total_seconds() / 3600, 1)
+
+                # Parse user time-range hint (used for x-axis label alignment)
+                try:
+                    h_start = int(tl_time_start.split(':')[0])
+                    h_end   = int(tl_time_end.split(':')[0])
+                except Exception:
+                    h_start, h_end = 8, 20
+
+                # ── Build colour map by product ───────────────────────
+                products_uniq = sorted(set(b['product'] for b in bars_all))
+                clr = ['#4facfe','#00f2fe','#11998e','#38ef7d','#f093fb',
+                       '#f5576c','#fda085','#f6d365','#a18cd1','#fbc2eb',
+                       '#84fab0','#8fd3f4','#ff9a9e','#fecfef','#667eea',
+                       '#764ba2','#ff6b6b','#feca57','#48dbfb','#ff9ff3']
+                prod_color = {p: clr[i % len(clr)] for i, p in enumerate(products_uniq)}
+
+                # ── Group bars by machine ─────────────────────────────
+                machine_bars = {m: [] for m in machines}
+                for b in bars_all:
+                    if b['machine'] in machine_bars:
+                        machine_bars[b['machine']].append(b)
+
+                # ── KPI sidebar data ──────────────────────────────────
+                total_ops   = len(bars_all)
+                total_dur   = sum(b['duration_h'] for b in bars_all)
+                kpi_data_tl = st.session_state.get('kpi_data') or {}
+                makespan_h  = kpi_data_tl.get('total_makespan_hours', round(span_hrs, 1))
+                util_rows   = kpi_data_tl.get('machine_utilization', []) or []
+                n_setups    = len(set(b['batch_id'] for b in bars_all))
+                throughput  = kpi_data_tl.get('throughput_units_per_day', 0) or 0
+
+                # ── Layout constants ──────────────────────────────────
+                LABEL_W   = 180      # px – frozen machine-name column
+                ROW_H     = 56       # px – height of each machine row
+                TRACK_PAD = 6        # px – top/bottom padding inside track
+                BAR_H     = ROW_H - TRACK_PAD * 2   # 44 px bars
+                PX_PER_HR = 120      # px per hour → total canvas width
+                CANVAS_W  = max(1200, int(span_hrs * PX_PER_HR))
+
+                # ── KPI panel ─────────────────────────────────────────
+                kpi_items = [
+                    ("Total Makespan",   f"{makespan_h:.1f} h"),
+                    ("Total Operations", f"{total_ops:,}"),
+                    ("Batches / Setups", f"{n_setups:,}"),
+                    ("Throughput",       f"{throughput:.0f} units/day"),
+                    ("Opt. Goal",        tl_opt_goal.split()[1]),
+                ]
+                kpi_rows_html = "".join(f"""
+                  <div class='kpi-row'>
+                    <span class='kpi-lbl'>{lbl}</span>
+                    <span class='kpi-val'>{val}</span>
+                  </div>""" for lbl, val in kpi_items)
+
+                util_bars_html = ""
+                for m in machines:
+                    util_pct  = next((u['utilization'] for u in util_rows
+                                      if u['machine'] == m), 0)
+                    bar_color = ('#ef4444' if util_pct >= 85 else
+                                 '#f59e0b' if util_pct >= 70 else '#10b981')
+                    safe_m = m.replace("'", "&#39;").replace('"', '&quot;')
+                    util_bars_html += f"""
+                  <div class='util-item'>
+                    <div class='util-name' title='{safe_m}'>{safe_m}</div>
+                    <div class='util-track'>
+                      <div class='util-fill' style='width:{min(util_pct,100):.1f}%;
+                           background:{bar_color};'></div>
+                    </div>
+                    <div class='util-pct'>{util_pct:.1f}%</div>
+                  </div>"""
+
+                # ── Tick marks (pixel-based) ──────────────────────────
+                n_ticks   = min(16, max(6, int(span_hrs)))
+                tick_step = span_hrs / n_ticks
+                tick_items = []
+                for i in range(n_ticks + 1):
+                    tick_dt  = t_min + timedelta(hours=i * tick_step)
+                    tick_lbl = tick_dt.strftime('%H:%M' if span_hrs <= 48 else '%b %d')
+                    tick_px  = i * tick_step * PX_PER_HR
+                    tick_items.append((tick_px, tick_lbl))
+
+                # Tick marks for the header row (absolute inside canvas)
+                tick_header_html = "".join(
+                    f"<div style='position:absolute;left:{px:.1f}px;"
+                    f"transform:translateX(-50%);color:#9ca3af;font-size:11px;"
+                    f"white-space:nowrap;top:4px;'>{lbl}</div>"
+                    for px, lbl in tick_items
+                )
+                # Vertical grid lines inside each track
+                grid_lines_html = "".join(
+                    f"<div style='position:absolute;left:{px:.1f}px;top:0;bottom:0;"
+                    f"width:1px;background:rgba(255,255,255,0.06);'></div>"
+                    for px, _ in tick_items
+                )
+
+                # ── Machine rows (pixel-based positioning) ────────────
+                rows_html = ""
+                for ri, machine in enumerate(machines):
+                    mbars    = machine_bars.get(machine, [])
+                    safe_m   = machine.replace("'", "&#39;").replace('"', '&quot;')
+                    row_bg   = '#111a11' if ri % 2 == 0 else '#0e1a0e'
+                    bar_blocks = grid_lines_html   # grid lines in every row
+
+                    if not mbars:
+                        bar_blocks += (f"<div style='position:absolute;left:50%;top:50%;"
+                                       f"transform:translate(-50%,-50%);color:#374151;"
+                                       f"font-size:13px;'>— no operations —</div>")
+                    else:
+                        for b in sorted(mbars, key=lambda x: x['start']):
+                            bs_dt  = _parse_iso(b['start'])
+                            be_dt  = _parse_iso(b['end'])
+                            offset = (bs_dt - t_min).total_seconds() / 3600
+                            dur_b  = b['duration_h']
+                            left_px  = max(0.0, offset * PX_PER_HR)
+                            width_px = max(4.0, dur_b * PX_PER_HR)
+                            color    = prod_color.get(b['product'], '#4facfe')
+                            step_no  = b['step']
+                            step_nm  = b.get('step_name', '')
+                            batch_id = b.get('batch_id', '')
+                            tip = (f"Step {step_no}: {step_nm} | "
+                                   f"Product {b['product']} | Batch {batch_id} | "
+                                   f"{bs_dt.strftime('%H:%M')} – "
+                                   f"{be_dt.strftime('%H:%M')} ({dur_b:.2f} h)"
+                                   ).replace("'", "&#39;")
+                            opacity  = 1.0 if b.get('batch_num', 1) % 2 == 1 else 0.75
+                            # show step number always; name only if bar is wide enough
+                            inner_label = (f"<div class='bar-step'>Step {step_no}</div>"
+                                           f"<div class='bar-name'>{step_nm[:18]}</div>"
+                                           if width_px > 60 else
+                                           f"<div class='bar-step'>{step_no}</div>")
+                            bar_blocks += f"""
+                            <div class='bar' title='{tip}'
+                                 style='left:{left_px:.1f}px;width:{width_px:.1f}px;
+                                        background:{color};opacity:{opacity};
+                                        top:{TRACK_PAD}px;height:{BAR_H}px;'>
+                              {inner_label}
+                            </div>"""
+
+                    rows_html += f"""
+                    <div class='gantt-row' style='background:{row_bg};'>
+                      <div class='row-label' title='{safe_m}'>{safe_m}</div>
+                      <div class='row-track' style='width:{CANVAS_W}px;height:{ROW_H}px;
+                                                    position:relative;'>
+                        {bar_blocks}
+                      </div>
+                    </div>"""
+
+                # ── Legend ────────────────────────────────────────────
+                legend_html = "".join(
+                    f"<div class='legend-item'>"
+                    f"<div class='legend-dot' style='background:{col};'></div>"
+                    f"<span>Product {prod}</span></div>"
+                    for prod, col in list(prod_color.items())[:20]
+                )
+
+                # ── Tabular view ──────────────────────────────────────
+                def _step_in_slot(mbars, slot_idx, total_slots):
+                    slot_s = slot_idx * (span_hrs / total_slots)
+                    slot_e = (slot_idx + 1) * (span_hrs / total_slots)
+                    steps  = sorted(set(
+                        f"Step {b['step']}" for b in mbars
+                        if slot_s <= (_parse_iso(b['start']) - t_min
+                                      ).total_seconds() / 3600 < slot_e
+                    ))
+                    return "<br>".join(steps) if steps else "—"
+
+                n_slots   = min(len(tick_items) - 1, 6)
+                hdr_cells = "".join(
+                    f"<th>{tick_items[i][1]}</th>" for i in range(n_slots)
+                )
+                table_rows_html = ""
+                for ri, machine in enumerate(machines):
+                    mbars    = machine_bars.get(machine, [])
+                    row_cls  = 'tr-even' if ri % 2 == 0 else 'tr-odd'
+                    cells    = "".join(
+                        f"<td>{_step_in_slot(mbars, i, n_slots)}</td>"
+                        for i in range(n_slots)
+                    )
+                    table_rows_html += (
+                        f"<tr class='{row_cls}'>"
+                        f"<td class='td-machine'>{machine}</td>{cells}</tr>"
+                    )
+
+                # ── Heights ───────────────────────────────────────────
+                gantt_scroll_h = min(500, max(200, len(machines) * ROW_H + 40))
+                total_iframe_h = gantt_scroll_h + len(machines) * 60 + 560
+
+                # ── Full HTML document ────────────────────────────────
+                full_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset='utf-8'>
+<style>
+* {{ box-sizing:border-box; margin:0; padding:0; }}
+body {{
+  background:#0e1117;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  color:#e5e7eb;
+  padding:14px;
+  font-size:13px;
+}}
+
+/* ── Layout ──────────────────────────────────────── */
+.page-title  {{ font-size:20px;font-weight:700;color:#fff;margin-bottom:2px; }}
+.page-sub    {{ font-size:12px;color:#6b7280;margin-bottom:18px; }}
+.outer       {{ display:flex;gap:16px;align-items:flex-start; }}
+.left-panel  {{ flex:1;min-width:0; }}
+.kpi-panel   {{
+  width:240px;min-width:240px;flex-shrink:0;
+  background:#0d1f0d;border:1px solid #1a3a1a;
+  border-radius:10px;padding:18px;
+}}
+
+/* ── KPI panel ───────────────────────────────────── */
+.kpi-title   {{ color:#00ff9f;font-size:14px;font-weight:700;
+               margin-bottom:14px;letter-spacing:.3px; }}
+.kpi-row     {{ display:flex;justify-content:space-between;align-items:center;
+               padding:9px 0;border-bottom:1px solid #1a2a1a; }}
+.kpi-lbl     {{ color:#9ca3af;font-size:12px; }}
+.kpi-val     {{ color:#fff;font-weight:700;font-size:13px; }}
+.sec-title   {{ color:#00ff9f;font-size:11px;font-weight:700;
+               text-transform:uppercase;letter-spacing:.8px;
+               margin:16px 0 10px 0; }}
+.util-item   {{ margin:8px 0; }}
+.util-name   {{ color:#d1d5db;font-size:11px;margin-bottom:3px;
+               white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }}
+.util-track  {{ background:#1f2f1f;border-radius:4px;height:7px;
+               overflow:hidden; }}
+.util-fill   {{ height:7px;border-radius:4px;transition:width .3s; }}
+.util-pct    {{ color:#6b7280;font-size:10px;text-align:right;margin-top:2px; }}
+
+/* ── Gantt chart ─────────────────────────────────── */
+.gantt-wrap  {{
+  border:1px solid #1f2f1f;border-radius:8px;overflow:hidden;
+}}
+/* frozen header row */
+.gantt-header {{
+  display:flex;background:#0a140a;border-bottom:2px solid #1a3a1a;
+  position:sticky;top:0;z-index:10;
+}}
+.header-label {{
+  width:{LABEL_W}px;min-width:{LABEL_W}px;flex-shrink:0;
+  padding:8px 12px;font-size:11px;color:#6b7280;font-weight:600;
+  text-transform:uppercase;letter-spacing:.5px;
+  border-right:2px solid #1a3a1a;
+}}
+.header-ticks {{
+  flex:1;overflow:hidden;   /* matched to scroll container */
+}}
+.header-ticks-inner {{
+  position:relative;height:30px;
+  width:{CANVAS_W}px;
+}}
+
+/* scrollable body */
+.gantt-scroll {{
+  overflow:auto;
+  max-height:{gantt_scroll_h}px;
+}}
+.gantt-row {{
+  display:flex;align-items:stretch;
+  border-bottom:1px solid #1a2a1a;
+  transition:background .15s;
+}}
+.gantt-row:hover {{ filter:brightness(1.12); }}
+.row-label {{
+  width:{LABEL_W}px;min-width:{LABEL_W}px;flex-shrink:0;
+  padding:0 10px 0 12px;font-size:12px;font-weight:600;color:#d1d5db;
+  display:flex;align-items:center;
+  border-right:2px solid #1a3a1a;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  cursor:default;
+}}
+.row-track {{
+  flex:1;overflow:visible;position:relative;
+}}
+.bar {{
+  position:absolute;border-radius:5px;
+  display:flex;flex-direction:column;align-items:center;
+  justify-content:center;overflow:hidden;cursor:default;
+  border:1px solid rgba(255,255,255,0.18);
+  transition:filter .15s;
+  padding:0 4px;
+}}
+.bar:hover {{ filter:brightness(1.25);z-index:5; }}
+.bar-step {{
+  font-size:10px;font-weight:700;color:#fff;
+  text-shadow:0 1px 3px rgba(0,0,0,.9);
+  white-space:nowrap;line-height:1.2;
+}}
+.bar-name {{
+  font-size:9px;color:rgba(255,255,255,.8);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  max-width:100%;line-height:1.2;
+}}
+
+/* ── Legend ──────────────────────────────────────── */
+.legend      {{ display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;
+               padding-top:12px;border-top:1px solid #1a2a1a; }}
+.legend-item {{ display:flex;align-items:center;gap:5px;font-size:11px;
+               color:#9ca3af; }}
+.legend-dot  {{ width:12px;height:12px;border-radius:3px;flex-shrink:0; }}
+
+/* ── Tabular view ────────────────────────────────── */
+.tab-section {{ margin-top:22px; }}
+.tab-title   {{ color:#00ff9f;font-size:12px;font-weight:700;
+               text-transform:uppercase;letter-spacing:.8px;
+               margin-bottom:10px;display:flex;align-items:center;gap:6px; }}
+.tab-scroll  {{ overflow-x:auto;border:1px solid #1a2a1a;border-radius:8px; }}
+table        {{ border-collapse:collapse;min-width:600px; }}
+th           {{
+  padding:9px 14px;background:#0a1a2a;color:#4facfe;
+  font-size:11px;font-weight:600;border:1px solid #1e3a4a;
+  white-space:nowrap;text-align:left;position:sticky;top:0;
+}}
+td           {{
+  padding:8px 14px;border:1px solid #1a2a1a;
+  font-size:11px;color:#d1d5db;vertical-align:top;
+  line-height:1.6;
+}}
+.td-machine  {{
+  font-weight:600;color:#9ca3af;white-space:nowrap;
+  background:#0d1a0d;position:sticky;left:0;
+  border-right:2px solid #1a3a1a;
+}}
+.tr-even td  {{ background:#0d1a0d; }}
+.tr-odd  td  {{ background:#0a140a; }}
+.tr-even .td-machine, .tr-odd .td-machine {{ background:#0a180a; }}
+tr:hover td  {{ background:#111e11 !important; }}
+</style>
+<script>
+// Sync header-ticks scroll with gantt-scroll
+document.addEventListener('DOMContentLoaded', function() {{
+  var scroll = document.getElementById('gantt-scroll');
+  var hticks = document.getElementById('header-ticks');
+  if (scroll && hticks) {{
+    scroll.addEventListener('scroll', function() {{
+      hticks.scrollLeft = scroll.scrollLeft;
+    }});
+  }}
+}});
+</script>
+</head>
+<body>
+
+<div class='page-title'>Production Schedule Dashboard</div>
+<div class='page-sub'>Optimized Machine Time Allocation</div>
+
+<div class='outer'>
+
+  <!-- ── LEFT: Gantt + table ── -->
+  <div class='left-panel'>
+
+    <div class='gantt-wrap'>
+      <!-- Frozen header -->
+      <div class='gantt-header'>
+        <div class='header-label'>Machine</div>
+        <div class='header-ticks' id='header-ticks' style='overflow:hidden;'>
+          <div class='header-ticks-inner'>
+            {tick_header_html}
+          </div>
+        </div>
+      </div>
+
+      <!-- Scrollable body -->
+      <div class='gantt-scroll' id='gantt-scroll'>
+        {rows_html}
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class='legend'>
+      {legend_html}
+    </div>
+
+    <!-- Tabular view -->
+    <div class='tab-section'>
+      <div class='tab-title'>📋 Tabular View</div>
+      <div class='tab-scroll'>
+        <table>
+          <thead>
+            <tr>
+              <th style='position:sticky;left:0;z-index:2;
+                         background:#0a1a2a;border-right:2px solid #1e3a4a;'>Machine</th>
+              {hdr_cells}
+            </tr>
+          </thead>
+          <tbody>
+            {table_rows_html}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /left-panel -->
+
+  <!-- ── RIGHT: KPI Panel ── -->
+  <div class='kpi-panel'>
+    <div class='kpi-title'>📊 KPIs</div>
+    {kpi_rows_html}
+    <div class='sec-title'>Machine Util.</div>
+    {util_bars_html}
+  </div>
+
+</div><!-- /outer -->
+</body>
+</html>"""
+
+                components.html(full_html, height=total_iframe_h, scrolling=False)
+
+        else:
+            st.info("Generate a schedule first, then click **Load Timeline**.")
+
+    # ── TAB 4 – Schedule Table ─────────────────────────────────────────
+    with tab_table:
+        st.subheader("📋 Schedule Table")
+
+        tf1, tf2, tf3 = st.columns([2, 2, 1])
+        with tf1:
+            tbl_machine = st.text_input("Filter by machine (partial match)", value="")
+        with tf2:
+            tbl_product = st.text_input("Filter by product item number", value="")
+        with tf3:
+            tbl_ps = st.selectbox("Rows per page", [100, 200, 500, 1000], index=1)
+
+        if st.button("🔄 Load Table", type="primary"):
+            st.session_state.tbl_page   = 1
+            st.session_state.tbl_loaded = True
+
+        if st.session_state.get('tbl_loaded', False):
+            params = {'page': st.session_state.tbl_page, 'page_size': tbl_ps}
+            if tbl_machine: params['machine'] = tbl_machine
+            if tbl_product: params['product'] = tbl_product
+
+            try:
+                r = requests.get(f"{API_BASE_URL}/get-schedule/",
+                                  params=params, timeout=30)
+                if r.ok:
+                    d         = r.json()
+                    results   = d.get('results', [])
+                    total_cnt = d.get('count', 0)
+                    total_pg  = d.get('total_pages', 1)
+
+                    st.markdown(f"**{total_cnt:,} operations** — "
+                                f"Page {st.session_state.tbl_page} of {total_pg}")
+
+                    if results:
+                        df_t = pd.DataFrame(results)
+                        df_t['start']      = pd.to_datetime(df_t['start'], format='ISO8601', utc=True).dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M')
+                        df_t['end']        = pd.to_datetime(df_t['end'],   format='ISO8601', utc=True).dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M')
+                        df_t['duration_h'] = df_t['duration_h'].round(2)
+                        st.dataframe(df_t, use_container_width=True, height=500)
+
+                        pc1, _, pc3 = st.columns([1, 2, 1])
+                        with pc1:
+                            if st.button("◀ Prev") and st.session_state.tbl_page > 1:
+                                st.session_state.tbl_page -= 1
+                                st.rerun()
+                        with pc3:
+                            if st.button("Next ▶") and st.session_state.tbl_page < total_pg:
+                                st.session_state.tbl_page += 1
+                                st.rerun()
+
+                        st.download_button("📥 Download this page (CSV)",
+                                           data=pd.DataFrame(results).to_csv(index=False),
+                                           file_name=f"schedule_p{st.session_state.tbl_page}.csv",
+                                           mime="text/csv")
+                    else:
+                        st.info("No records match the current filter.")
+                else:
+                    st.error(f"Error {r.status_code}: {r.text}")
+            except Exception as e:
+                st.error(f"Connection error: {e}")
+
+    # ── TAB 4 – KPIs ──────────────────────────────────────────────────
+    with tab_kpi:
+        st.subheader("📈 Schedule KPIs")
+
+        if st.button("🔄 Refresh KPIs", type="primary"):
+            try:
+                r = requests.get(f"{API_BASE_URL}/kpis/", timeout=30)
+                if r.ok:
+                    st.session_state.kpi_data = r.json()
+                else:
+                    st.error(f"Error {r.status_code}: {r.text}")
+            except Exception as e:
+                st.error(f"Connection error: {e}")
+
+        kpi = st.session_state.get('kpi_data')
+        if kpi:
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Total Makespan",   f"{kpi.get('total_makespan_hours',0):.1f} h")
+            k2.metric("Makespan (days)",  f"{kpi.get('total_makespan_days',0):.1f} d")
+            k3.metric("Total Operations", f"{kpi.get('total_operations',0):,}")
+            k4.metric("Units Scheduled",  f"{kpi.get('total_units_scheduled',0):,}")
+
+            st.markdown("---")
+            k5, k6 = st.columns(2)
+            k5.metric("Throughput / day",  f"{kpi.get('throughput_units_per_day',0):.1f} units")
+            k6.metric("Throughput / hour", f"{kpi.get('throughput_units_per_hour',0):.2f} units")
+
+            bn = kpi.get('bottleneck')
+            if bn:
+                st.markdown(f"""
+                <div style='background:#3a1a1a;border-left:4px solid #ef4444;
+                            padding:14px 18px;border-radius:6px;margin:18px 0;'>
+                <b style='color:#ef4444'>🚨 Bottleneck Machine</b><br>
+                <span style='color:#fff;font-size:1.2rem'><b>{bn['machine']}</b></span>
+                &nbsp;&nbsp;
+                <span style='color:#fca5a5'>{bn['utilization']:.1f}% utilisation
+                ({bn['used_hours']:.1f} h)</span>
+                </div>""", unsafe_allow_html=True)
+
+            util_rows = kpi.get('machine_utilization', [])
+            if util_rows:
+                st.markdown("#### 🏭 Machine Utilisation")
+                df_util   = pd.DataFrame(util_rows)
+                col_vals  = df_util['utilization'].tolist()
+                util_fig  = go.Figure(go.Bar(
+                    x=df_util['utilization'], y=df_util['machine'],
+                    orientation='h',
+                    marker=dict(
+                        color=col_vals,
+                        colorscale=[[0.0,'#10b981'],[0.6,'#f59e0b'],
+                                    [0.85,'#ef4444'],[1.0,'#7f1d1d']],
+                        cmin=0, cmax=100,
+                        colorbar=dict(title='%'),
+                    ),
+                    text=[f"{v:.1f}%" for v in col_vals],
+                    textposition='auto',
+                ))
+                util_fig.add_vline(x=85, line_dash='dash', line_color='red',
+                                    annotation_text='Critical 85%',
+                                    annotation_position='top right')
+                util_fig.add_vline(x=70, line_dash='dot', line_color='orange',
+                                    annotation_text='Watch 70%',
+                                    annotation_position='top right')
+                util_fig.update_layout(
+                    template='plotly_dark',
+                    height=max(400, 30 * len(util_rows) + 100),
+                    xaxis_title="Utilisation (%)",
+                    yaxis=dict(autorange='reversed'),
+                    margin=dict(l=180),
+                )
+                st.plotly_chart(util_fig, use_container_width=True)
+
+                st.markdown("#### 📊 Utilisation Distribution")
+                hf = px.histogram(df_util, x='utilization', nbins=15,
+                                   color_discrete_sequence=['#4facfe'],
+                                   template='plotly_dark',
+                                   title="Machine Utilisation Distribution",
+                                   labels={'utilization': 'Utilisation (%)'})
+                hf.update_layout(height=300)
+                st.plotly_chart(hf, use_container_width=True)
+
+                st.download_button("📥 Download KPI Data (CSV)",
+                                   data=df_util.to_csv(index=False),
+                                   file_name="schedule_kpis.csv", mime="text/csv")
+        else:
+            st.info("Click **Refresh KPIs** to load schedule performance metrics.")
+
+    # ── TAB 5 – Comparison ────────────────────────────────────────────
+    with tab_compare:
+        st.subheader("🔄 Schedule Comparison")
+        st.markdown(
+            "Compare the current saved schedule's KPIs against a re-generated preview "
+            "(no DB write) to evaluate different optimisation settings."
+        )
+
+        cmp1, cmp2 = st.columns(2)
+        with cmp1:
+            prev_opt = st.slider("Preview: bottleneck machines to optimise",
+                                  0, 15, 5)
+        with cmp2:
+            if st.button("▶️ Run Comparison", type="primary"):
+                with st.spinner("Fetching comparison data…"):
+                    try:
+                        cr = requests.get(f"{API_BASE_URL}/schedule-comparison/", timeout=30)
+                        pr = requests.get(f"{API_BASE_URL}/optimize-schedule-preview/",
+                                          params={'local_opt_machines': prev_opt},
+                                          timeout=120)
+                        if cr.ok and pr.ok:
+                            st.session_state.compare_current = cr.json().get('current_schedule', {})
+                            st.session_state.compare_preview = pr.json().get('preview_kpis', {})
+                        else:
+                            st.error("Error fetching comparison data.")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+
+        cur  = st.session_state.get('compare_current')
+        prev = st.session_state.get('compare_preview')
+
+        if cur and prev:
+            st.markdown("---")
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                st.markdown("#### 📌 Current Schedule")
+                st.metric("Makespan",        f"{cur.get('makespan_hours',0):.1f} h")
+                st.metric("Operations",      f"{cur.get('total_operations',0):,}")
+                st.metric("Avg Utilisation", f"{cur.get('avg_utilization',0):.1f}%")
+            with cc2:
+                st.markdown("#### 🔮 Preview (not saved)")
+                cur_mk  = cur.get('makespan_hours', 0)
+                prev_mk = prev.get('makespan_hours', 0)
+                st.metric("Makespan", f"{prev_mk:.1f} h",
+                           delta=f"{prev_mk - cur_mk:+.1f} h", delta_color="inverse")
+                st.metric("Operations", f"{prev.get('total_operations',0):,}")
+                st.metric("Bottleneck", f"{prev.get('bottleneck_machine','—')}")
+
+            cur_stats  = cur.get('machine_stats', [])
+            prev_utils = prev.get('utilisation', {})
+            if cur_stats and prev_utils:
+                df_cur  = pd.DataFrame(cur_stats).rename(
+                    columns={'utilization':'Current %','machine':'Machine'})
+                df_prev = pd.DataFrame([{'Machine':m,'Preview %':v}
+                                         for m,v in prev_utils.items()])
+                df_cmp  = (pd.merge(df_cur[['Machine','Current %']],
+                                     df_prev, on='Machine', how='outer')
+                             .fillna(0)
+                             .sort_values('Current %', ascending=False))
+                cf = go.Figure()
+                cf.add_trace(go.Bar(name='Current',  x=df_cmp['Machine'],
+                                    y=df_cmp['Current %'],  marker_color='#4facfe'))
+                cf.add_trace(go.Bar(name='Preview',  x=df_cmp['Machine'],
+                                    y=df_cmp['Preview %'],  marker_color='#00f2fe'))
+                cf.update_layout(barmode='group', template='plotly_dark',
+                                  title='Machine Utilisation: Current vs Preview',
+                                  xaxis_title='Machine', yaxis_title='Utilisation (%)',
+                                  height=400)
+                st.plotly_chart(cf, use_container_width=True)
+
+    # ── TAB 7 – Gap Optimizer ─────────────────────────────────────────
+    with tab_optimize:
+        st.subheader("🎯 Gap Analysis & Elimination")
+
+        # ── Why gaps happen ───────────────────────────────────────────
+        with st.expander("📖 Why do gaps appear? (click to learn)", expanded=False):
+            st.markdown("""
+**Three root causes create the idle gaps you see on machines like Cutting Automation and SKM Seal:**
+
+**① Precedence-induced starvation** — A machine finishes its current job and is free,
+but the *next operation waiting for it* belongs to a batch whose upstream step (on a
+different machine) has not finished yet. The machine sits idle until that upstream step
+completes — even though other machines may be busy.
+
+```
+Cutting Automation is free at t=1h
+But Product 3 Batch 2, Step 3 can't start until Step 2 (Connector Assembly) finishes at t=3h
+→ 2h idle gap, even though Cutting Automation is doing nothing
+```
+
+**② Batch-interleaving gaps** — Different products share a machine. When Product A's
+last batch finishes, Product B's next batch isn't ready yet (its upstream steps haven't
+finished on other machines). The machine waits.
+
+**③ SPT ordering mismatches** — The greedy dispatcher sorts all operations by shortest
+processing time globally. This means a machine might process batches in an order
+(Batch 7 → Batch 2 → Batch 15) that doesn't match the order their upstream jobs
+complete, creating "arrival gaps".
+
+**The fix — Left-Shift Compaction:**
+After the greedy schedule is built, slide every operation as early as possible:
+```
+for each operation O (sorted by start time):
+    earliest = max(machine_free_after[O.machine], upstream_step_done[O.job])
+    if earliest < O.start:
+        O.start = earliest  # slide left, fill the gap
+repeat until nothing moves (2–3 passes, completes in <1s)
+```
+Enable **Gap Elimination** in the Generate tab, then regenerate.
+            """)
+
+        # ── Load data source ──────────────────────────────────────────
+        st.markdown("#### 📊 Load Schedule Data for Analysis")
+        ga_src = st.radio(
+            "Data source",
+            ["Use already-loaded Gantt data (fast)",
+             "Fetch fresh from API (up to 5000 ops)"],
+            horizontal=True,
+        )
+
+        btn_analyze, btn_clear = st.columns([2, 1])
+        with btn_analyze:
+            do_analyze = st.button("🔍 Analyze Gaps Now",
+                                   type="primary", use_container_width=True)
+        with btn_clear:
+            if st.button("🗑 Clear Results", use_container_width=True):
+                st.session_state.gap_analysis = None
+                st.rerun()
+
+        if do_analyze:
+            bars = []
+            if "already-loaded" in ga_src:
+                gd = st.session_state.get('gantt_data') or st.session_state.get('timeline_data')
+                if gd:
+                    bars = gd.get('gantt_bars', [])
+                    if bars:
+                        st.success(f"Using {len(bars):,} bars from loaded Gantt data.")
+                    else:
+                        st.warning("No gantt bars in loaded data. Try loading Gantt first.")
+                else:
+                    st.warning("No Gantt data loaded. Switch to **Gantt Chart** tab → Load first.")
+            else:
+                with st.spinner("Fetching schedule from API…"):
+                    try:
+                        r2 = requests.get(f"{API_BASE_URL}/get-schedule/",
+                                          params={'page_size': 5000}, timeout=30)
+                        if r2.ok:
+                            raw_rows = r2.json().get('results', [])
+                            # Normalize to gantt bar format
+                            prods = sorted(set(row.get('product','') for row in raw_rows))
+                            cmap  = {p: i for i, p in enumerate(prods)}
+                            bars  = [{
+                                'machine':   row.get('machine', ''),
+                                'product':   row.get('product', ''),
+                                'step':      row.get('step', 0),
+                                'step_name': row.get('step_name', ''),
+                                'batch_id':  row.get('batch_id', ''),
+                                'batch_num': row.get('batch_num', 1),
+                                'start':     row.get('start', ''),
+                                'end':       row.get('end', ''),
+                                'duration_h': row.get('duration_h', 0),
+                                'color_key': cmap.get(row.get('product',''), 0),
+                            } for row in raw_rows if row.get('start') and row.get('end')]
+                            st.success(f"Fetched {len(bars):,} operations from API.")
+                        else:
+                            st.error(f"API error {r2.status_code}: {r2.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+
+            if bars:
+                st.session_state.gap_analysis = _compute_gaps_from_bars(bars)
+                st.session_state['_gap_bars']  = bars   # keep for Gantt render
+
+        # ── Display results ───────────────────────────────────────────
+        ga = st.session_state.get('gap_analysis')
+        if not ga:
+            st.markdown("""
+            <div style='text-align:center;padding:50px 20px;color:#4b5563;'>
+              <div style='font-size:52px;'>🔍</div>
+              <div style='font-size:15px;font-weight:600;color:#6b7280;margin:10px 0;'>
+                No gap analysis loaded yet
+              </div>
+              <div style='font-size:12px;'>
+                Load Gantt data first, then click <b>Analyze Gaps Now</b>
+              </div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            # ── Summary KPIs ──────────────────────────────────────────
+            st.markdown("---")
+            gm1, gm2, gm3, gm4 = st.columns(4)
+            gm1.metric("Total Idle Gaps",      ga['total_gaps'],
+                       help="Gaps > 1 minute across all machines")
+            gm2.metric("Total Idle Time",       f"{ga['total_idle_hours']:.1f} h")
+            gm3.metric("Worst Machine",         ga['worst_machine'])
+            gm4.metric("Gap-Free Machines",     ga['clean_machines'])
+
+            # ── Cause breakdown ───────────────────────────────────────
+            causes = ga['causes']
+            total_c = sum(causes.values()) or 1
+            st.markdown("#### 🔬 Gap Cause Breakdown")
+            cc1, cc2, cc3 = st.columns(3)
+            cc1.metric("① Precedence-induced",
+                       f"{causes['precedence']} gaps",
+                       f"{causes['precedence']/total_c*100:.0f}% of gaps",
+                       help="Machine free but upstream step not done yet")
+            cc2.metric("② Batch-interleaving",
+                       f"{causes['interleave']} gaps",
+                       f"{causes['interleave']/total_c*100:.0f}% of gaps",
+                       help="Different products competing for same machine")
+            cc3.metric("③ SPT ordering",
+                       f"{causes['spt']} gaps",
+                       f"{causes['spt']/total_c*100:.0f}% of gaps",
+                       help="SPT reordering leaves holes before upstream jobs arrive")
+
+            # ── Machine idle bar chart ────────────────────────────────
+            st.markdown("#### 📊 Idle Time by Machine")
+            df_ms = pd.DataFrame(ga['machine_stats'])
+            if not df_ms.empty:
+                df_ms = df_ms.sort_values('idle_hours', ascending=False)
+                bar_colors = [
+                    '#ef4444' if v > 4 else '#f59e0b' if v > 1 else '#22c55e'
+                    for v in df_ms['idle_hours']
+                ]
+                idle_fig = go.Figure()
+                idle_fig.add_trace(go.Bar(
+                    x=df_ms['machine'], y=df_ms['idle_hours'],
+                    name='Idle Hours',
+                    marker_color=bar_colors,
+                    text=[f"{v:.2f}h" for v in df_ms['idle_hours']],
+                    textposition='auto',
+                    hovertemplate='<b>%{x}</b><br>Idle: %{y:.2f}h<extra></extra>',
+                ))
+                idle_fig.add_trace(go.Scatter(
+                    x=df_ms['machine'], y=df_ms['gap_count'],
+                    name='Gap Count', yaxis='y2',
+                    mode='markers+lines',
+                    marker=dict(color='#a78bfa', size=9, symbol='diamond'),
+                    line=dict(color='#a78bfa', width=2, dash='dot'),
+                    hovertemplate='<b>%{x}</b><br>Gaps: %{y}<extra></extra>',
+                ))
+                idle_fig.update_layout(
+                    template='plotly_dark', height=380,
+                    title='Machine Idle Time and Gap Count',
+                    xaxis_title='Machine',
+                    yaxis=dict(title='Idle Hours'),
+                    yaxis2=dict(title='Gap Count', overlaying='y', side='right'),
+                    legend=dict(orientation='h', y=1.08),
+                    margin=dict(b=120),
+                )
+                idle_fig.update_xaxes(tickangle=30)
+                st.plotly_chart(idle_fig, use_container_width=True)
+
+            # ── Gap Gantt with red idle markers ──────────────────────
+            st.markdown("#### 🗓 Schedule with Gaps Highlighted")
+            st.caption("Red/orange blocks = idle gaps. Hover for details.")
+
+            bars_for_gantt = st.session_state.get('_gap_bars', [])
+            if bars_for_gantt:
+                # Re-use build_gantt_figure for operation bars
+                machines_in_gap = sorted(set(b['machine'] for b in bars_for_gantt))
+                prods_g = sorted(set(str(b.get('product','')) for b in bars_for_gantt))
+                cmap_g  = {p: i for i, p in enumerate(prods_g)}
+                _epoch  = datetime(1970, 1, 1)
+
+                gfig = go.Figure()
+                seen_p = set()
+                _CLRS = px.colors.qualitative.Plotly + px.colors.qualitative.D3
+                for b in bars_for_gantt:
+                    prod  = str(b.get('product', ''))
+                    s_dt  = _parse_iso(b['start'])
+                    e_dt  = _parse_iso(b['end'])
+                    dur_h = (e_dt - s_dt).total_seconds() / 3600
+                    base  = (s_dt - _epoch).total_seconds() / 3600
+                    color = _CLRS[cmap_g.get(prod, 0) % len(_CLRS)]
+                    show  = prod not in seen_p; seen_p.add(prod)
+                    gfig.add_trace(go.Bar(
+                        name=f"P{prod}", x=[dur_h], y=[b['machine']],
+                        orientation='h', base=[base], marker_color=color,
+                        opacity=0.78, showlegend=show, legendgroup=prod,
+                        hovertemplate=(
+                            f"<b>P{prod}</b> Step {b.get('step')}<br>"
+                            f"{s_dt.strftime('%H:%M')} – {e_dt.strftime('%H:%M')}<br>"
+                            f"{dur_h:.2f}h<extra></extra>"
+                        ),
+                    ))
+
+                # Overlay red gap blocks
+                first_gap = True
+                for gap in ga['gap_list']:
+                    gs  = _parse_iso(gap['gap_start'])
+                    ge  = _parse_iso(gap['gap_end'])
+                    dur = (ge - gs).total_seconds() / 3600
+                    base = (gs - _epoch).total_seconds() / 3600
+                    cause_colors = {
+                        'precedence': 'rgba(239,68,68,0.60)',
+                        'interleave': 'rgba(245,158,11,0.60)',
+                        'spt':        'rgba(167,139,250,0.60)',
+                    }
+                    gfig.add_trace(go.Bar(
+                        name='Gap (idle)' if first_gap else '_gap',
+                        x=[dur], y=[gap['machine']],
+                        orientation='h', base=[base],
+                        marker_color=cause_colors.get(gap['cause'], 'rgba(239,68,68,0.5)'),
+                        marker_line=dict(color='rgba(255,255,255,0.4)', width=1),
+                        showlegend=first_gap, legendgroup='_gap',
+                        hovertemplate=(
+                            f"<b>⏸ GAP — {gap['machine']}</b><br>"
+                            f"Idle {gap['idle_hours']:.3f}h<br>"
+                            f"Cause: <b>{gap['cause']}</b><br>"
+                            f"{gap['before_op']} → {gap['after_op']}<extra></extra>"
+                        ),
+                    ))
+                    first_gap = False
+
+                # X axis ticks
+                all_s = [_parse_iso(b['start']) for b in bars_for_gantt]
+                all_e = [_parse_iso(b['end'])   for b in bars_for_gantt]
+                t0h = (min(all_s) - _epoch).total_seconds() / 3600
+                t1h = (max(all_e) - _epoch).total_seconds() / 3600
+                span_d = (t1h - t0h) / 24
+                tstep  = 24 if span_d <= 3 else 12 if span_d <= 7 else 7*24
+                tvals  = list(range(int(t0h), int(t1h) + 1, tstep))
+                ttxt   = [(_epoch + pd.Timedelta(hours=h)).strftime('%b %d %H:%M')
+                          for h in tvals]
+                gfig.update_layout(
+                    template='plotly_dark',
+                    height=max(480, 52 * len(machines_in_gap) + 140),
+                    barmode='overlay',
+                    title='Gantt with Gap Overlay (red=precedence, amber=interleave, purple=SPT)',
+                    xaxis=dict(title='Time', tickvals=tvals, ticktext=ttxt,
+                               range=[t0h, t1h], showgrid=True, gridcolor='#2a2a2a'),
+                    yaxis=dict(title='Machine', autorange='reversed',
+                               showgrid=True, gridcolor='#1a1a1a'),
+                    legend=dict(title='', orientation='v', x=1.01, y=1),
+                    margin=dict(l=200, r=160, t=70, b=60),
+                )
+                st.plotly_chart(gfig, use_container_width=True)
+
+                # Colour legend explanation
+                st.markdown("""
+                <div style='display:flex;gap:20px;font-size:12px;margin-top:-8px;margin-bottom:12px;'>
+                  <span><span style='display:inline-block;width:14px;height:14px;background:rgba(239,68,68,0.7);border-radius:3px;vertical-align:middle;margin-right:5px;'></span>Red = Precedence gap</span>
+                  <span><span style='display:inline-block;width:14px;height:14px;background:rgba(245,158,11,0.7);border-radius:3px;vertical-align:middle;margin-right:5px;'></span>Amber = Batch-interleave gap</span>
+                  <span><span style='display:inline-block;width:14px;height:14px;background:rgba(167,139,250,0.7);border-radius:3px;vertical-align:middle;margin-right:5px;'></span>Purple = SPT-ordering gap</span>
+                </div>""", unsafe_allow_html=True)
+
+            # ── Detailed gap table ────────────────────────────────────
+            with st.expander(f"📋 Full Gap List ({ga['total_gaps']} gaps)"):
+                df_gl = pd.DataFrame(ga['gap_list'])
+                if not df_gl.empty:
+                    df_gl = df_gl.sort_values('idle_hours', ascending=False)
+                    for col in ['gap_start', 'gap_end']:
+                        df_gl[col] = (pd.to_datetime(df_gl[col], format='ISO8601', utc=True)
+                                      .dt.tz_localize(None)
+                                      .dt.strftime('%Y-%m-%d %H:%M'))
+                    st.dataframe(
+                        df_gl[['machine','gap_start','gap_end',
+                               'idle_hours','cause','before_op','after_op']],
+                        use_container_width=True, height=320
+                    )
+                    st.download_button(
+                        "📥 Download Gap Report (CSV)",
+                        data=df_gl.to_csv(index=False),
+                        file_name="gap_analysis.csv",
+                        mime="text/csv",
+                    )
+
+            # ── Fix CTA ───────────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("### 🔧 Fix These Gaps")
+            st.markdown("""
+            <div style='background:#0a1f0a;border:1px solid #166534;border-radius:8px;
+                        padding:16px 20px;margin-bottom:18px;'>
+              <div style='color:#22c55e;font-weight:700;font-size:15px;margin-bottom:8px;'>
+                ✅ Left-Shift Compaction eliminates most gaps in seconds
+              </div>
+              <div style='color:#9ca3af;font-size:13px;line-height:1.6;'>
+                <b style='color:#d1fae5'>How it works:</b> After the greedy scheduler runs,
+                every operation is slid as early as possible on its machine — respecting
+                precedence (step N+1 after step N) and no-overlap constraints. Typically
+                converges in 2–3 passes. Expected improvement: <b style='color:#22c55e'>
+                60–90% gap reduction</b>.<br><br>
+                <b style='color:#d1fae5'>To apply:</b>
+                Go to <b>⚙️ Generate Schedule</b> tab →
+                check <b>🔀 Enable Gap Elimination</b> →
+                click <b>🚀 Generate Schedule</b>.<br>
+                Your backend <code>generate-schedule</code> API will receive
+                <code>"enable_compaction": true</code> in the request body.
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Quick-launch button
+            fc1, fc2 = st.columns([3, 1])
+            with fc1:
+                fix_date = st.date_input("Start date for re-schedule",
+                                          value=date.today(), key="gap_fix_date")
+            with fc2:
+                fix_opt = st.number_input("Bottleneck machines (MILP)",
+                                           min_value=0, max_value=15, value=5,
+                                           key="gap_fix_opt")
+
+            if st.button("🚀 Re-Generate with Gap Elimination",
+                         type="primary", use_container_width=True):
+                payload = {
+                    'start_date':         fix_date.isoformat(),
+                    'local_opt_machines': fix_opt,
+                    'clear_existing':     True,
+                    'enable_compaction':  True,
+                    'batch_overrides':    st.session_state.get('batch_overrides', []),
+                    'async_mode':         True,
+                }
+                try:
+                    r = requests.post(f"{API_BASE_URL}/generate-schedule/",
+                                      json=payload, timeout=30)
+                    if r.status_code in (200, 201, 202):
+                        task_id = r.json().get('task_id')
+                        if task_id:
+                            st.session_state.schedule_task_id   = task_id
+                            st.session_state.schedule_task_done = False
+                            st.session_state.gap_analysis       = None
+                            st.success(f"✅ Gap-elimination schedule submitted — Task `{task_id}`")
+                            st.info("Switch to **⚙️ Generate Schedule** tab to watch progress.")
+                        else:
+                            st.success("Schedule generated synchronously with gap elimination.")
+                    else:
+                        st.error(f"Error {r.status_code}: {r.text}")
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
+
+
+# ===========================================================================
+# PAGE 3 – Buffer Optimization
+# ===========================================================================
+
 elif page == "📊 Buffer Optimization":
     st.header("Buffer Optimization Analysis")
-    
-    # Safety factor input
+
     col1, col2, col3 = st.columns([1, 2, 2])
     with col1:
-        safety_factor = st.number_input(
-            "Safety Factor",
-            min_value=1.0,
-            max_value=3.0,
-            value=1.5,
-            step=0.1,
-            help="Multiplier for buffer calculations (higher = more conservative)"
-        )
-    
+        safety_factor = st.number_input("Safety Factor", min_value=1.0,
+                                         max_value=3.0, value=1.5, step=0.1)
     with col2:
-        total_budget = st.number_input(
-            "Total Buffer Budget (optional)",
-            min_value=0.0,
-            value=0.0,
-            step=100.0,
-            help="If set > 0, uses PuLP to optimally allocate this budget across machines"
-        )
-    
+        total_budget = st.number_input("Total Buffer Budget (optional)",
+                                        min_value=0.0, value=0.0, step=100.0)
     with col3:
         if st.button("🔄 Load Buffer Data", type="primary"):
             st.session_state.load_buffer = True
-    
-    # Fetch buffer optimization data
+
     if st.session_state.get('load_buffer', False):
         try:
             params = {'safety_factor': safety_factor}
             if total_budget > 0:
                 params['total_budget'] = total_budget
-            
-            response = requests.get(
-                f"{API_BASE_URL}/buffer-optimization/",
-                params=params,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                
+            r = requests.get(f"{API_BASE_URL}/buffer-optimization/",
+                             params=params, timeout=30)
+            if r.status_code == 200:
+                data = r.json()
                 if 'buffer_recommendations' in data and data['buffer_recommendations']:
-                    # Display parameters
                     st.subheader("📈 Production Parameters")
-                    params_data = data['parameters']
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Throughput/Hour", f"{params_data['throughput_per_hour']:.2f} units")
-                    col2.metric("Makespan", f"{params_data['makespan_hours']:.2f} hours")
-                    col3.metric("Safety Factor", f"{params_data['safety_factor']}")
-                    col4.metric("Total Units", f"{params_data['total_units']}")
-                    
+                    pd_ = data['parameters']
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Throughput/Hour", f"{pd_['throughput_per_hour']:.2f} units")
+                    c2.metric("Makespan",        f"{pd_['makespan_hours']:.2f} hours")
+                    c3.metric("Safety Factor",   f"{pd_['safety_factor']}")
+                    c4.metric("Total Units",     f"{pd_['total_units']}")
                     st.info(f"**Formula:** {data['formula']}")
-                    
-                    # If PuLP allocation was used
+
                     if 'pulp_allocation' in data:
+                        pa = data['pulp_allocation']
                         st.success(f"""
                         **🎯 PuLP Optimal Allocation Applied!**
-                        - Budget Available: {data['pulp_allocation']['total_budget']:.2f} units
-                        - Total Required: {data['pulp_allocation']['total_required']:.2f} units
-                        - Total Allocated: {data['pulp_allocation']['total_allocated']:.2f} units
-                        - Optimization: Minimizes utilization-weighted shortfall (high-util machines get buffer first)
+                        - Budget Available: {pa['total_budget']:.2f} units
+                        - Total Required:   {pa['total_required']:.2f} units
+                        - Total Allocated:  {pa['total_allocated']:.2f} units
+                        - Optimisation: Minimises utilisation-weighted shortfall
                         """)
-                    
-                    # Convert to DataFrame
-                    df_buffer = pd.DataFrame(data['buffer_recommendations'])
-                    
-                    # Display metrics
+
+                    df_buf = pd.DataFrame(data['buffer_recommendations'])
                     st.subheader("🎯 Buffer Recommendations by Machine")
-                    
-                    # Create visualizations
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Bar chart: Buffer sizes
-                        fig_buffer = px.bar(
-                            df_buffer,
-                            x='machine',
-                            y='buffer_size_units',
-                            color='recommendation',
-                            title="Recommended Buffer Sizes by Machine",
-                            labels={'buffer_size_units': 'Buffer Size (units)', 'machine': 'Machine'},
-                            color_discrete_map={
-                                'HIGH PRIORITY': '#ef4444',
-                                'MEDIUM PRIORITY': '#f59e0b',
-                                'LOW PRIORITY': '#10b981'
-                            }
-                        )
-                        fig_buffer.update_layout(showlegend=True)
-                        st.plotly_chart(fig_buffer, use_container_width=True)
-                    
-                    with col2:
-                        # Scatter plot: Utilization vs Buffer Size
-                        fig_scatter = px.scatter(
-                            df_buffer,
-                            x='utilization',
-                            y='buffer_size_units',
-                            size='total_operations',
-                            color='recommendation',
-                            hover_data=['machine', 'avg_operation_time_hours'],
-                            title="Utilization vs Buffer Requirements",
-                            labels={
-                                'utilization': 'Utilization (%)',
-                                'buffer_size_units': 'Buffer Size (units)'
-                            },
-                            color_discrete_map={
-                                'HIGH PRIORITY': '#ef4444',
-                                'MEDIUM PRIORITY': '#f59e0b',
-                                'LOW PRIORITY': '#10b981'
-                            }
-                        )
-                        st.plotly_chart(fig_scatter, use_container_width=True)
-                    
-                    # If PuLP was used, show allocation vs required
-                    if 'allocated_buffer' in df_buffer.columns:
-                        st.subheader("💰 Budget Allocation (PuLP Optimized)")
-                        
-                        fig_alloc = go.Figure()
-                        fig_alloc.add_trace(go.Bar(
-                            name='Required',
-                            x=df_buffer['machine'],
-                            y=df_buffer['required_buffer'],
-                            marker_color='lightcoral'
-                        ))
-                        fig_alloc.add_trace(go.Bar(
-                            name='Allocated',
-                            x=df_buffer['machine'],
-                            y=df_buffer['allocated_buffer'],
-                            marker_color='lightgreen'
-                        ))
-                        fig_alloc.update_layout(
-                            barmode='group',
-                            title='Required vs Allocated Buffer',
-                            xaxis_title='Machine',
-                            yaxis_title='Buffer Units',
-                            height=400
-                        )
-                        st.plotly_chart(fig_alloc, use_container_width=True)
-                    
-                    # Detailed table
+
+                    bc1, bc2 = st.columns(2)
+                    with bc1:
+                        fig_b = px.bar(df_buf, x='machine', y='buffer_size_units',
+                                        color='recommendation',
+                                        title="Recommended Buffer Sizes by Machine",
+                                        color_discrete_map={
+                                            'HIGH PRIORITY':   '#ef4444',
+                                            'MEDIUM PRIORITY': '#f59e0b',
+                                            'LOW PRIORITY':    '#10b981'
+                                        })
+                        st.plotly_chart(fig_b, use_container_width=True)
+                    with bc2:
+                        fig_s = px.scatter(df_buf, x='utilization', y='buffer_size_units',
+                                            size='total_operations', color='recommendation',
+                                            hover_data=['machine','avg_operation_time_hours'],
+                                            title="Utilization vs Buffer Requirements",
+                                            color_discrete_map={
+                                                'HIGH PRIORITY':   '#ef4444',
+                                                'MEDIUM PRIORITY': '#f59e0b',
+                                                'LOW PRIORITY':    '#10b981'
+                                            })
+                        st.plotly_chart(fig_s, use_container_width=True)
+
+                    if 'allocated_buffer' in df_buf.columns:
+                        st.subheader("💰 Budget Allocation (PuLP Optimised)")
+                        fig_a = go.Figure()
+                        fig_a.add_trace(go.Bar(name='Required', x=df_buf['machine'],
+                                                y=df_buf['required_buffer'],
+                                                marker_color='lightcoral'))
+                        fig_a.add_trace(go.Bar(name='Allocated', x=df_buf['machine'],
+                                                y=df_buf['allocated_buffer'],
+                                                marker_color='lightgreen'))
+                        fig_a.update_layout(barmode='group', height=400,
+                                             title='Required vs Allocated Buffer',
+                                             xaxis_title='Machine', yaxis_title='Buffer Units')
+                        st.plotly_chart(fig_a, use_container_width=True)
+
                     st.subheader("📋 Detailed Buffer Recommendations")
-                    
-                    df_display = df_buffer.copy()
-                    df_display['buffer_size_units'] = df_display['buffer_size_units'].round(2)
-                    df_display['utilization'] = df_display['utilization'].apply(lambda x: f"{x:.2f}%")
-                    df_display['avg_operation_time_hours'] = df_display['avg_operation_time_hours'].round(4)
-                    
-                    st.dataframe(df_display, use_container_width=True)
-                    
-                    # Download button
-                    csv = df_buffer.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Buffer Data (CSV)",
-                        data=csv,
-                        file_name="buffer_recommendations.csv",
-                        mime="text/csv"
-                    )
+                    df_d = df_buf.copy()
+                    df_d['buffer_size_units']        = df_d['buffer_size_units'].round(2)
+                    df_d['utilization']              = df_d['utilization'].apply(lambda x: f"{x:.2f}%")
+                    df_d['avg_operation_time_hours'] = df_d['avg_operation_time_hours'].round(4)
+                    st.dataframe(df_d, use_container_width=True)
+                    st.download_button("📥 Download Buffer Data (CSV)",
+                                       data=df_buf.to_csv(index=False),
+                                       file_name="buffer_recommendations.csv", mime="text/csv")
                 else:
                     st.info("No schedule data available for buffer optimization.")
             else:
-                st.error(f"Error: {response.status_code} - {response.text}")
-                
-        except requests.exceptions.RequestException as e:
-            st.error(f"Connection error: {str(e)}")
+                st.error(f"Error {r.status_code}: {r.text}")
         except Exception as e:
-            st.error(f"Error loading buffer data: {str(e)}")
+            st.error(f"Error loading buffer data: {e}")
 
-# ==================== PAGE 4: Bottleneck Analysis ====================
+
+# ===========================================================================
+# PAGE 4 – Bottleneck Analysis
+# ===========================================================================
+
 elif page == "🔍 Bottleneck Analysis":
     st.header("Bottleneck Analysis")
-    
+
     if st.button("🔄 Load Bottleneck Data", type="primary"):
         st.session_state.load_bottleneck = True
-    
+
     if st.session_state.get('load_bottleneck', False):
         try:
-            response = requests.get(f"{API_BASE_URL}/bottleneck-analysis/", timeout=30)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
+            r = requests.get(f"{API_BASE_URL}/bottleneck-analysis/", timeout=30)
+            if r.status_code == 200:
+                data = r.json()
                 if 'machine_analysis' in data and data['machine_analysis']:
-                    # Display summary
                     st.subheader("📊 Overall Summary")
-                    summary = data['summary']
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Total Makespan", f"{summary['total_makespan_hours']:.2f} hrs")
-                    col2.metric("Bottleneck Machine", summary['bottleneck_machine'])
-                    col3.metric("Bottleneck Utilization", f"{summary['bottleneck_utilization']:.2f}%")
-                    col4.metric("Average Utilization", f"{summary['avg_utilization']:.2f}%")
-                    
-                    # Convert to DataFrame
-                    df_bottleneck = pd.DataFrame(data['machine_analysis'])
-                    
-                    # Visualizations
+                    s = data['summary']
+                    s1, s2, s3, s4 = st.columns(4)
+                    s1.metric("Total Makespan",         f"{s['total_makespan_hours']:.2f} hrs")
+                    s2.metric("Bottleneck Machine",     s['bottleneck_machine'])
+                    s3.metric("Bottleneck Utilization", f"{s['bottleneck_utilization']:.2f}%")
+                    s4.metric("Average Utilization",    f"{s['avg_utilization']:.2f}%")
+
+                    df_bn = pd.DataFrame(data['machine_analysis'])
                     st.subheader("🎯 Machine Utilization Analysis")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Horizontal bar chart
-                        fig_util = go.Figure()
-                        
-                        colors = []
-                        for status in df_bottleneck['status']:
-                            if 'CRITICAL' in status:
-                                colors.append('#ef4444')
-                            elif 'POTENTIAL' in status:
-                                colors.append('#f59e0b')
-                            elif 'WELL' in status:
-                                colors.append('#10b981')
-                            else:
-                                colors.append('#6b7280')
-                        
-                        fig_util.add_trace(go.Bar(
-                            y=df_bottleneck['machine'],
-                            x=df_bottleneck['utilization'],
-                            orientation='h',
-                            marker=dict(color=colors),
-                            text=df_bottleneck['utilization'].apply(lambda x: f"{x:.1f}%"),
+
+                    bn1, bn2 = st.columns(2)
+                    with bn1:
+                        colors = ['#ef4444' if 'CRITICAL' in s else
+                                  '#f59e0b' if 'POTENTIAL' in s else
+                                  '#10b981' if 'WELL' in s else '#6b7280'
+                                  for s in df_bn['status']]
+                        fu = go.Figure()
+                        fu.add_trace(go.Bar(
+                            y=df_bn['machine'], x=df_bn['utilization'],
+                            orientation='h', marker=dict(color=colors),
+                            text=df_bn['utilization'].apply(lambda x: f"{x:.1f}%"),
                             textposition='auto'
                         ))
-                        
-                        fig_util.update_layout(
-                            title="Machine Utilization (%)",
-                            xaxis_title="Utilization (%)",
-                            yaxis_title="Machine",
-                            showlegend=False,
-                            height=400
-                        )
-                        
-                        st.plotly_chart(fig_util, use_container_width=True)
-                    
-                    with col2:
-                        # Pie chart
-                        status_counts = df_bottleneck['status'].value_counts()
-                        fig_pie = px.pie(
-                            values=status_counts.values,
-                            names=status_counts.index,
-                            title="Machine Status Distribution",
-                            color=status_counts.index,
-                            color_discrete_map={
-                                'CRITICAL BOTTLENECK': '#ef4444',
-                                'POTENTIAL BOTTLENECK': '#f59e0b',
-                                'WELL UTILIZED': '#10b981',
-                                'UNDERUTILIZED': '#6b7280'
-                            }
-                        )
-                        st.plotly_chart(fig_pie, use_container_width=True)
-                    
-                    # Time utilization breakdown
+                        fu.update_layout(title="Machine Utilization (%)",
+                                          xaxis_title="Utilization (%)",
+                                          yaxis_title="Machine",
+                                          showlegend=False, height=400)
+                        st.plotly_chart(fu, use_container_width=True)
+
+                    with bn2:
+                        sc = df_bn['status'].value_counts()
+                        fp = px.pie(values=sc.values, names=sc.index,
+                                     title="Machine Status Distribution",
+                                     color=sc.index,
+                                     color_discrete_map={
+                                         'CRITICAL BOTTLENECK':  '#ef4444',
+                                         'POTENTIAL BOTTLENECK': '#f59e0b',
+                                         'WELL UTILIZED':        '#10b981',
+                                         'UNDERUTILIZED':        '#6b7280'
+                                     })
+                        st.plotly_chart(fp, use_container_width=True)
+
                     st.subheader("⏱️ Time Utilization Breakdown")
-                    
-                    fig_time = go.Figure()
-                    
-                    fig_time.add_trace(go.Bar(
-                        name='Used Hours',
-                        y=df_bottleneck['machine'],
-                        x=df_bottleneck['used_hours'],
-                        orientation='h',
-                        marker_color='#3b82f6'
-                    ))
-                    
-                    fig_time.add_trace(go.Bar(
-                        name='Idle Hours',
-                        y=df_bottleneck['machine'],
-                        x=df_bottleneck['idle_hours'],
-                        orientation='h',
-                        marker_color='#e5e7eb'
-                    ))
-                    
-                    fig_time.update_layout(
-                        barmode='stack',
-                        title="Used vs Idle Hours by Machine",
-                        xaxis_title="Hours",
-                        yaxis_title="Machine",
-                        height=400
-                    )
-                    
-                    st.plotly_chart(fig_time, use_container_width=True)
-                    
-                    # Detailed machine analysis
+                    ft = go.Figure()
+                    ft.add_trace(go.Bar(name='Used Hours', y=df_bn['machine'],
+                                         x=df_bn['used_hours'], orientation='h',
+                                         marker_color='#3b82f6'))
+                    ft.add_trace(go.Bar(name='Idle Hours', y=df_bn['machine'],
+                                         x=df_bn['idle_hours'], orientation='h',
+                                         marker_color='#e5e7eb'))
+                    ft.update_layout(barmode='stack', height=400,
+                                      title="Used vs Idle Hours by Machine",
+                                      xaxis_title="Hours", yaxis_title="Machine")
+                    st.plotly_chart(ft, use_container_width=True)
+
                     st.subheader("📋 Detailed Machine Analysis")
-                    
-                    for _, row in df_bottleneck.iterrows():
-                        with st.expander(f"**{row['machine']}** - {row['status']}"):
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                st.metric("Utilization", f"{row['utilization']:.2f}%")
-                                st.metric("Used Hours", f"{row['used_hours']:.2f}")
-                            
-                            with col2:
-                                st.metric("Idle Hours", f"{row['idle_hours']:.2f}")
-                                st.metric("Idle %", f"{row['idle_percentage']:.2f}%")
-                            
-                            with col3:
-                                st.metric("Operations", row['num_operations'])
-                                st.metric("Avg Op Time", f"{row['avg_operation_time_hours']:.4f} hrs")
-                            
+                    for _, row in df_bn.iterrows():
+                        with st.expander(f"**{row['machine']}** — {row['status']}"):
+                            d1, d2, d3 = st.columns(3)
+                            d1.metric("Utilization", f"{row['utilization']:.2f}%")
+                            d1.metric("Used Hours",  f"{row['used_hours']:.2f}")
+                            d2.metric("Idle Hours",  f"{row['idle_hours']:.2f}")
+                            d2.metric("Idle %",      f"{row['idle_percentage']:.2f}%")
+                            d3.metric("Operations",  row['num_operations'])
+                            d3.metric("Avg Op Time", f"{row['avg_operation_time_hours']:.4f} hrs")
                             st.info(f"**Recommendation:** {row['recommendation']}")
-                    
-                    # Download button
-                    csv = df_bottleneck.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Bottleneck Analysis (CSV)",
-                        data=csv,
-                        file_name="bottleneck_analysis.csv",
-                        mime="text/csv"
-                    )
+
+                    st.download_button("📥 Download Bottleneck Analysis (CSV)",
+                                       data=df_bn.to_csv(index=False),
+                                       file_name="bottleneck_analysis.csv", mime="text/csv")
                 else:
                     st.info("No schedule data available for bottleneck analysis.")
             else:
-                st.error(f"Error: {response.status_code} - {response.text}")
-                
-        except requests.exceptions.RequestException as e:
-            st.error(f"Connection error: {str(e)}")
+                st.error(f"Error {r.status_code}: {r.text}")
         except Exception as e:
-            st.error(f"Error loading bottleneck data: {str(e)}")
+            st.error(f"Error loading bottleneck data: {e}")
