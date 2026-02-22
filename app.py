@@ -80,17 +80,77 @@ _defaults = {
     'tbl_page':           1,
     'tbl_loaded':         False,
     'timeline_data':      None,
+    # Auth
+    'auth_token':         None,
+    'username':           None,
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# ── Sidebar: API URL ─────────────────────────────────────────────────────────
+
+def get_auth_headers():
+    """Return headers dict with token for authenticated API calls."""
+    token = st.session_state.get("auth_token")
+    return {"Authorization": f"Token {token}"} if token else {}
+
+
+def is_authenticated():
+    return bool(st.session_state.get("auth_token"))
+
+
+# ── Sidebar: API URL (and auth) ─────────────────────────────────────────────
 API_BASE_URL = st.sidebar.text_input(
     "API Base URL",
     value="http://localhost:8000/api",
-    help="Enter your Django API base URL"
+    help="Enter your Django API base URL",
+    key="api_base_url_input",
 )
+
+if not is_authenticated():
+    st.sidebar.info("👤 Sign in to use the app.")
+    st.markdown("## 🔐 Sign in")
+    st.markdown("Enter your credentials to access the Production Analytics Suite.")
+    with st.form("login_form", clear_on_submit=False):
+        login_user = st.text_input("Username", key="login_username")
+        login_pass = st.text_input("Password", type="password", key="login_password")
+        submitted = st.form_submit_button("Sign in")
+        if submitted:
+            if login_user and login_pass:
+                try:
+                    r = requests.post(
+                        f"{API_BASE_URL}/auth/login/",
+                        json={"username": login_user, "password": login_pass},
+                        timeout=10,
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        st.session_state.auth_token = data["token"]
+                        st.session_state.username = data["user"]["username"]
+                        st.success("Welcome! Redirecting…")
+                        st.rerun()
+                    else:
+                        err = r.json().get("error", "Login failed")
+                        st.error(err)
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
+            else:
+                st.warning("Enter username and password.")
+    st.stop()
+
+st.sidebar.success(f"Logged in as **{st.session_state.username}**")
+if st.sidebar.button("Log out", key="logout_btn"):
+    try:
+        requests.post(
+            f"{API_BASE_URL}/auth/logout/",
+            headers=get_auth_headers(),
+            timeout=5,
+        )
+    except Exception:
+        pass
+    st.session_state.auth_token = None
+    st.session_state.username = None
+    st.rerun()
 
 
 # ===========================================================================
@@ -99,7 +159,17 @@ API_BASE_URL = st.sidebar.text_input(
 
 def fetch_data(endpoint, params=None):
     try:
-        r = requests.get(f"{API_BASE_URL}/{endpoint}/", params=params, timeout=30)
+        r = requests.get(
+            f"{API_BASE_URL}/{endpoint}/",
+            params=params,
+            headers=get_auth_headers(),
+            timeout=30,
+        )
+        if r.status_code == 401:
+            st.session_state.auth_token = None
+            st.session_state.username = None
+            st.error("Session expired. Please log in again.")
+            st.rerun()
         return r.json() if r.status_code == 200 else (st.error(f"Error {r.status_code}"), None)[1]
     except Exception as e:
         st.error(f"Connection error: {e}")
@@ -108,7 +178,17 @@ def fetch_data(endpoint, params=None):
 
 def post_data(endpoint, data=None):
     try:
-        r = requests.post(f"{API_BASE_URL}/{endpoint}/", json=data, timeout=60)
+        r = requests.post(
+            f"{API_BASE_URL}/{endpoint}/",
+            json=data,
+            headers=get_auth_headers(),
+            timeout=60,
+        )
+        if r.status_code == 401:
+            st.session_state.auth_token = None
+            st.session_state.username = None
+            st.error("Session expired. Please log in again.")
+            st.rerun()
         if r.status_code in (200, 201, 202):
             return r.json()
         st.error(f"Error {r.status_code}: {r.text}")
@@ -120,8 +200,19 @@ def post_data(endpoint, data=None):
 
 def post_files(endpoint, files_dict, data_dict=None):
     try:
-        r = requests.post(f"{API_BASE_URL}/{endpoint}/",
-                          files=files_dict, data=data_dict, timeout=120)
+        # multipart: auth header only; requests sends form + files
+        r = requests.post(
+            f"{API_BASE_URL}/{endpoint}/",
+            files=files_dict,
+            data=data_dict,
+            headers=get_auth_headers(),
+            timeout=120,
+        )
+        if r.status_code == 401:
+            st.session_state.auth_token = None
+            st.session_state.username = None
+            st.error("Session expired. Please log in again.")
+            st.rerun()
         if r.status_code in (200, 201, 202):
             return r.json()
         st.error(f"Error {r.status_code}: {r.text}")
@@ -133,7 +224,11 @@ def post_files(endpoint, files_dict, data_dict=None):
 
 def check_task_status(task_id):
     try:
-        r = requests.get(f"{API_BASE_URL}/task-status/{task_id}/", timeout=10)
+        r = requests.get(
+            f"{API_BASE_URL}/task-status/{task_id}/",
+            headers=get_auth_headers(),
+            timeout=10,
+        )
         return r.json() if r.status_code == 200 else None
     except Exception as e:
         st.error(f"Error checking task: {e}")
@@ -349,7 +444,7 @@ def _render_task_progress(task_id: str, api_url: str):
 
     for _ in range(150):   # ~5 min at 2-second polls
         try:
-            resp = requests.get(f"{api_url}/task-status/{task_id}/", timeout=10)
+            resp = requests.get(f"{api_url}/task-status/{task_id}/", headers=get_auth_headers(), timeout=10)
             if not resp.ok:
                 status_text.warning("Could not reach task status endpoint.")
                 break
@@ -405,6 +500,7 @@ page = st.sidebar.radio(
     "Navigate",
     ["📊 Production Analytics",
      "📅 Schedule Management",
+     "📋 Filter Data",
      "📊 Buffer Optimization",
      "🔍 Bottleneck Analysis"],
     key="navigation"
@@ -430,7 +526,8 @@ if page == "📊 Production Analytics":
                     uploaded_file.seek(0)
                     try:
                         r = requests.post(f"{API_BASE_URL}/csv-filter-options/",
-                                          files={"file": uploaded_file})
+                                          files={"file": uploaded_file},
+                                          headers=get_auth_headers())
                         if r.status_code == 200:
                             st.session_state.filter_options = r.json()
                             st.session_state.filters_loaded = True
@@ -472,7 +569,8 @@ if page == "📊 Production Analytics":
                             "tool_no":      selected_tool_no,
                             "area":         selected_area,
                         },
-                        files={"file": uploaded_file}
+                        files={"file": uploaded_file},
+                        headers=get_auth_headers(),
                     )
                     if r.status_code == 200:
                         st.session_state.data      = r.json()
@@ -842,7 +940,7 @@ elif page == "📅 Schedule Management":
         with st.expander("🔬 Advanced Options — Per-product batch override"):
             st.markdown("Leave empty to use batch sizes already stored in the database.")
             try:
-                pr = requests.get(f"{API_BASE_URL}/get-filter-options/", timeout=10)
+                pr = requests.get(f"{API_BASE_URL}/get-filter-options/", headers=get_auth_headers(), timeout=10)
                 products_list = pr.json().get('products', []) if pr.ok else []
             except Exception:
                 products_list = []
@@ -878,7 +976,7 @@ elif page == "📅 Schedule Management":
                                      type="primary", use_container_width=True)
         with btn2:
             try:
-                ex = requests.get(f"{API_BASE_URL}/get-schedule/?page_size=1", timeout=5)
+                ex = requests.get(f"{API_BASE_URL}/get-schedule/?page_size=1", headers=get_auth_headers(), timeout=5)
                 if ex.ok and ex.json().get('count', 0) > 0:
                     st.metric("Current schedule ops", ex.json()['count'])
             except Exception:
@@ -896,7 +994,7 @@ elif page == "📅 Schedule Management":
             with st.spinner("Submitting job to Celery…"):
                 try:
                     r = requests.post(f"{API_BASE_URL}/generate-schedule/",
-                                      json=payload, timeout=30)
+                                      json=payload, headers=get_auth_headers(), timeout=30)
                     if r.status_code in (200, 201, 202):
                         task_id = r.json().get('task_id')
                         if task_id:
@@ -923,7 +1021,7 @@ elif page == "📅 Schedule Management":
         gc1, gc2, gc3 = st.columns([2, 1, 1])
         with gc1:
             try:
-                mr = requests.get(f"{API_BASE_URL}/get-filter-options/", timeout=10)
+                mr = requests.get(f"{API_BASE_URL}/get-filter-options/", headers=get_auth_headers(), timeout=10)
                 all_machines = mr.json().get('machines', []) if mr.ok else []
             except Exception:
                 all_machines = []
@@ -943,7 +1041,7 @@ elif page == "📅 Schedule Management":
             with st.spinner("Fetching Gantt data…"):
                 try:
                     r = requests.get(f"{API_BASE_URL}/schedule-gantt/",
-                                     params=params, timeout=30)
+                                     params=params, headers=get_auth_headers(), timeout=30)
                     if r.ok:
                         st.session_state.gantt_data = r.json()
                     else:
@@ -994,7 +1092,7 @@ elif page == "📅 Schedule Management":
         tl1, tl2, tl3, tl4 = st.columns([2, 1, 1, 1])
         with tl1:
             try:
-                mr2 = requests.get(f"{API_BASE_URL}/get-filter-options/", timeout=10)
+                mr2 = requests.get(f"{API_BASE_URL}/get-filter-options/", headers=get_auth_headers(), timeout=10)
                 tl_machines = mr2.json().get('machines', []) if mr2.ok else []
             except Exception:
                 tl_machines = []
@@ -1008,9 +1106,16 @@ elif page == "📅 Schedule Management":
         with tl3:
             tl_time_end   = st.text_input("Time range end  (HH:MM)", value="20:00")
         with tl4:
-            tl_opt_goal   = st.radio("Optimisation Goal",
-                                      ["Minimize Makespan", "Maximize Throughput"],
-                                      index=0)
+            time_interval_minutes = st.selectbox(
+                "⏱️ Time interval",
+                options=[1, 5, 15, 30, 60, 120],
+                index=1,
+                format_func=lambda x: f"{x} min",
+                help="Timeline tick interval (default 5 min). Canvas width = tick count × spacing.",
+            )
+            tl_opt_goal = st.radio("Optimisation Goal",
+                                   ["Minimize Makespan", "Maximize Throughput"],
+                                   index=0)
 
         if st.button("🔄 Load Timeline", type="primary"):
             # Use get-schedule endpoint (always available) with gantt format
@@ -1023,7 +1128,7 @@ elif page == "📅 Schedule Management":
                 # Try schedule-gantt first
                 try:
                     r = requests.get(f"{API_BASE_URL}/schedule-gantt/",
-                                     params=params, timeout=30)
+                                     params=params, headers=get_auth_headers(), timeout=30)
                     if r.ok:
                         st.session_state.timeline_data = r.json()
                         loaded = True
@@ -1035,7 +1140,7 @@ elif page == "📅 Schedule Management":
                     try:
                         r2 = requests.get(f"{API_BASE_URL}/get-schedule/",
                                           params={'page_size': 2000, 'format': 'gantt'},
-                                          timeout=30)
+                                          headers=get_auth_headers(), timeout=30)
                         if r2.ok:
                             raw   = r2.json()
                             rows  = raw.get('results', [])
@@ -1124,13 +1229,18 @@ elif page == "📅 Schedule Management":
                 n_setups    = len(set(b['batch_id'] for b in bars_all))
                 throughput  = kpi_data_tl.get('throughput_units_per_day', 0) or 0
 
-                # ── Layout constants ──────────────────────────────────
-                LABEL_W   = 180      # px – frozen machine-name column
-                ROW_H     = 56       # px – height of each machine row
-                TRACK_PAD = 6        # px – top/bottom padding inside track
-                BAR_H     = ROW_H - TRACK_PAD * 2   # 44 px bars
-                PX_PER_HR = 120      # px per hour → total canvas width
-                CANVAS_W  = max(1200, int(span_hrs * PX_PER_HR))
+                # ── Layout constants (compact) ────────────────────────
+                LABEL_W    = 140     # px – frozen machine-name column
+                ROW_H      = 44     # px – height of each machine row
+                TRACK_PAD  = 4      # px – top/bottom padding inside track
+                BAR_H      = ROW_H - TRACK_PAD * 2
+                TICK_SPACING_PX = 40   # px between timeline ticks (drives canvas width)
+                # Time interval: ticks every time_interval_minutes; CANVAS_W = tick count × spacing
+                n_ticks = int(span_hrs * 60 / time_interval_minutes) + 1
+                n_ticks = min(max(n_ticks, 2), 500)   # cap for huge/short spans
+                CANVAS_W = (n_ticks - 1) * TICK_SPACING_PX
+                CANVAS_W = max(CANVAS_W, 400)         # minimum width
+                PX_PER_HR = CANVAS_W / span_hrs       # bar positions from this
 
                 # ── KPI panel ─────────────────────────────────────────
                 kpi_items = [
@@ -1163,14 +1273,13 @@ elif page == "📅 Schedule Management":
                     <div class='util-pct'>{util_pct:.1f}%</div>
                   </div>"""
 
-                # ── Tick marks (pixel-based) ──────────────────────────
-                n_ticks   = min(16, max(6, int(span_hrs)))
-                tick_step = span_hrs / n_ticks
+                # ── Tick marks: one per time_interval_minutes; position = i × TICK_SPACING_PX ──
                 tick_items = []
-                for i in range(n_ticks + 1):
-                    tick_dt  = t_min + timedelta(hours=i * tick_step)
+                for i in range(n_ticks):
+                    tick_hrs = i * (time_interval_minutes / 60)
+                    tick_dt  = t_min + timedelta(hours=tick_hrs)
                     tick_lbl = tick_dt.strftime('%H:%M' if span_hrs <= 48 else '%b %d')
-                    tick_px  = i * tick_step * PX_PER_HR
+                    tick_px  = i * TICK_SPACING_PX
                     tick_items.append((tick_px, tick_lbl))
 
                 # Tick marks for the header row (absolute inside canvas)
@@ -1275,9 +1384,9 @@ elif page == "📅 Schedule Management":
                         f"<td class='td-machine'>{machine}</td>{cells}</tr>"
                     )
 
-                # ── Heights ───────────────────────────────────────────
-                gantt_scroll_h = min(500, max(200, len(machines) * ROW_H + 40))
-                total_iframe_h = gantt_scroll_h + len(machines) * 60 + 560
+                # ── Heights (compact) ──────────────────────────────────
+                gantt_scroll_h = min(420, max(180, len(machines) * ROW_H + 24))
+                total_iframe_h = gantt_scroll_h + len(machines) * 40 + 380
 
                 # ── Full HTML document ────────────────────────────────
                 full_html = f"""<!DOCTYPE html>
@@ -1290,63 +1399,61 @@ body {{
   background:#0e1117;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   color:#e5e7eb;
-  padding:14px;
-  font-size:13px;
+  padding:8px 10px;
+  font-size:12px;
 }}
 
-/* ── Layout ──────────────────────────────────────── */
-.page-title  {{ font-size:20px;font-weight:700;color:#fff;margin-bottom:2px; }}
-.page-sub    {{ font-size:12px;color:#6b7280;margin-bottom:18px; }}
-.outer       {{ display:flex;gap:16px;align-items:flex-start; }}
+/* ── Layout (compact) ─────────────────────────────── */
+.page-title  {{ font-size:16px;font-weight:700;color:#fff;margin-bottom:1px; }}
+.page-sub    {{ font-size:11px;color:#6b7280;margin-bottom:10px; }}
+.outer       {{ display:flex;gap:10px;align-items:flex-start; }}
 .left-panel  {{ flex:1;min-width:0; }}
 .kpi-panel   {{
-  width:240px;min-width:240px;flex-shrink:0;
+  width:200px;min-width:200px;flex-shrink:0;
   background:#0d1f0d;border:1px solid #1a3a1a;
-  border-radius:10px;padding:18px;
+  border-radius:6px;padding:10px 12px;
 }}
 
 /* ── KPI panel ───────────────────────────────────── */
-.kpi-title   {{ color:#00ff9f;font-size:14px;font-weight:700;
-               margin-bottom:14px;letter-spacing:.3px; }}
+.kpi-title   {{ color:#00ff9f;font-size:12px;font-weight:700;
+               margin-bottom:8px;letter-spacing:.3px; }}
 .kpi-row     {{ display:flex;justify-content:space-between;align-items:center;
-               padding:9px 0;border-bottom:1px solid #1a2a1a; }}
-.kpi-lbl     {{ color:#9ca3af;font-size:12px; }}
-.kpi-val     {{ color:#fff;font-weight:700;font-size:13px; }}
-.sec-title   {{ color:#00ff9f;font-size:11px;font-weight:700;
+               padding:5px 0;border-bottom:1px solid #1a2a1a; }}
+.kpi-lbl     {{ color:#9ca3af;font-size:11px; }}
+.kpi-val     {{ color:#fff;font-weight:700;font-size:12px; }}
+.sec-title   {{ color:#00ff9f;font-size:10px;font-weight:700;
                text-transform:uppercase;letter-spacing:.8px;
-               margin:16px 0 10px 0; }}
-.util-item   {{ margin:8px 0; }}
-.util-name   {{ color:#d1d5db;font-size:11px;margin-bottom:3px;
+               margin:10px 0 6px 0; }}
+.util-item   {{ margin:5px 0; }}
+.util-name   {{ color:#d1d5db;font-size:10px;margin-bottom:2px;
                white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }}
-.util-track  {{ background:#1f2f1f;border-radius:4px;height:7px;
+.util-track  {{ background:#1f2f1f;border-radius:3px;height:6px;
                overflow:hidden; }}
-.util-fill   {{ height:7px;border-radius:4px;transition:width .3s; }}
-.util-pct    {{ color:#6b7280;font-size:10px;text-align:right;margin-top:2px; }}
+.util-fill   {{ height:6px;border-radius:3px;transition:width .3s; }}
+.util-pct    {{ color:#6b7280;font-size:9px;text-align:right;margin-top:1px; }}
 
-/* ── Gantt chart ─────────────────────────────────── */
+/* ── Gantt chart (compact) ───────────────────────── */
 .gantt-wrap  {{
-  border:1px solid #1f2f1f;border-radius:8px;overflow:hidden;
+  border:1px solid #1f2f1f;border-radius:6px;overflow:hidden;
 }}
-/* frozen header row */
 .gantt-header {{
-  display:flex;background:#0a140a;border-bottom:2px solid #1a3a1a;
+  display:flex;background:#0a140a;border-bottom:1px solid #1a3a1a;
   position:sticky;top:0;z-index:10;
 }}
 .header-label {{
   width:{LABEL_W}px;min-width:{LABEL_W}px;flex-shrink:0;
-  padding:8px 12px;font-size:11px;color:#6b7280;font-weight:600;
+  padding:4px 8px;font-size:10px;color:#6b7280;font-weight:600;
   text-transform:uppercase;letter-spacing:.5px;
-  border-right:2px solid #1a3a1a;
+  border-right:1px solid #1a3a1a;
 }}
 .header-ticks {{
-  flex:1;overflow:hidden;   /* matched to scroll container */
+  flex:1;overflow:hidden;
 }}
 .header-ticks-inner {{
-  position:relative;height:30px;
+  position:relative;height:22px;
   width:{CANVAS_W}px;
 }}
 
-/* scrollable body */
 .gantt-scroll {{
   overflow:auto;
   max-height:{gantt_scroll_h}px;
@@ -1359,63 +1466,55 @@ body {{
 .gantt-row:hover {{ filter:brightness(1.12); }}
 .row-label {{
   width:{LABEL_W}px;min-width:{LABEL_W}px;flex-shrink:0;
-  padding:0 10px 0 12px;font-size:12px;font-weight:600;color:#d1d5db;
+  padding:0 6px 0 8px;font-size:11px;font-weight:600;color:#d1d5db;
   display:flex;align-items:center;
-  border-right:2px solid #1a3a1a;
+  border-right:1px solid #1a3a1a;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   cursor:default;
 }}
-.row-track {{
-  flex:1;overflow:visible;position:relative;
-}}
+.row-track {{ flex:1;overflow:visible;position:relative; }}
 .bar {{
-  position:absolute;border-radius:5px;
+  position:absolute;border-radius:4px;
   display:flex;flex-direction:column;align-items:center;
   justify-content:center;overflow:hidden;cursor:default;
   border:1px solid rgba(255,255,255,0.18);
   transition:filter .15s;
-  padding:0 4px;
+  padding:0 3px;
 }}
 .bar:hover {{ filter:brightness(1.25);z-index:5; }}
-.bar-step {{
-  font-size:10px;font-weight:700;color:#fff;
-  text-shadow:0 1px 3px rgba(0,0,0,.9);
-  white-space:nowrap;line-height:1.2;
-}}
-.bar-name {{
-  font-size:9px;color:rgba(255,255,255,.8);
+.bar-step {{ font-size:9px;font-weight:700;color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,.9);
+  white-space:nowrap;line-height:1.1; }}
+.bar-name {{ font-size:8px;color:rgba(255,255,255,.8);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  max-width:100%;line-height:1.2;
-}}
+  max-width:100%;line-height:1.1; }}
 
-/* ── Legend ──────────────────────────────────────── */
-.legend      {{ display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;
-               padding-top:12px;border-top:1px solid #1a2a1a; }}
-.legend-item {{ display:flex;align-items:center;gap:5px;font-size:11px;
+.legend      {{ display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;
+               padding-top:8px;border-top:1px solid #1a2a1a; }}
+.legend-item {{ display:flex;align-items:center;gap:4px;font-size:10px;
                color:#9ca3af; }}
-.legend-dot  {{ width:12px;height:12px;border-radius:3px;flex-shrink:0; }}
+.legend-dot  {{ width:10px;height:10px;border-radius:2px;flex-shrink:0; }}
 
-/* ── Tabular view ────────────────────────────────── */
-.tab-section {{ margin-top:22px; }}
-.tab-title   {{ color:#00ff9f;font-size:12px;font-weight:700;
+.tab-section {{ margin-top:12px; }}
+.tab-title   {{ color:#00ff9f;font-size:11px;font-weight:700;
                text-transform:uppercase;letter-spacing:.8px;
-               margin-bottom:10px;display:flex;align-items:center;gap:6px; }}
-.tab-scroll  {{ overflow-x:auto;border:1px solid #1a2a1a;border-radius:8px; }}
-table        {{ border-collapse:collapse;min-width:600px; }}
+               margin-bottom:6px; }}
+.tab-scroll  {{ overflow-x:auto;border:1px solid #1a2a1a;border-radius:6px; }}
+table        {{ border-collapse:collapse;min-width:500px; }}
 th           {{
-  padding:9px 14px;background:#0a1a2a;color:#4facfe;
-  font-size:11px;font-weight:600;border:1px solid #1e3a4a;
+  padding:5px 10px;background:#0a1a2a;color:#4facfe;
+  font-size:10px;font-weight:600;border:1px solid #1e3a4a;
   white-space:nowrap;text-align:left;position:sticky;top:0;
 }}
 td           {{
-  padding:8px 14px;border:1px solid #1a2a1a;
-  font-size:11px;color:#d1d5db;vertical-align:top;
-  line-height:1.6;
+  padding:4px 10px;border:1px solid #1a2a1a;
+  font-size:10px;color:#d1d5db;vertical-align:top;
+  line-height:1.4;
 }}
 .td-machine  {{
   font-weight:600;color:#9ca3af;white-space:nowrap;
   background:#0d1a0d;position:sticky;left:0;
-  border-right:2px solid #1a3a1a;
+  border-right:1px solid #1a3a1a;
 }}
 .tr-even td  {{ background:#0d1a0d; }}
 .tr-odd  td  {{ background:#0a140a; }}
@@ -1475,7 +1574,7 @@ document.addEventListener('DOMContentLoaded', function() {{
           <thead>
             <tr>
               <th style='position:sticky;left:0;z-index:2;
-                         background:#0a1a2a;border-right:2px solid #1e3a4a;'>Machine</th>
+                         background:#0a1a2a;border-right:1px solid #1e3a4a;'>Machine</th>
               {hdr_cells}
             </tr>
           </thead>
@@ -1528,7 +1627,7 @@ document.addEventListener('DOMContentLoaded', function() {{
 
             try:
                 r = requests.get(f"{API_BASE_URL}/get-schedule/",
-                                  params=params, timeout=30)
+                                  params=params, headers=get_auth_headers(), timeout=30)
                 if r.ok:
                     d         = r.json()
                     results   = d.get('results', [])
@@ -1572,7 +1671,7 @@ document.addEventListener('DOMContentLoaded', function() {{
 
         if st.button("🔄 Refresh KPIs", type="primary"):
             try:
-                r = requests.get(f"{API_BASE_URL}/kpis/", timeout=30)
+                r = requests.get(f"{API_BASE_URL}/kpis/", headers=get_auth_headers(), timeout=30)
                 if r.ok:
                     st.session_state.kpi_data = r.json()
                 else:
@@ -1669,10 +1768,10 @@ document.addEventListener('DOMContentLoaded', function() {{
             if st.button("▶️ Run Comparison", type="primary"):
                 with st.spinner("Fetching comparison data…"):
                     try:
-                        cr = requests.get(f"{API_BASE_URL}/schedule-comparison/", timeout=30)
+                        cr = requests.get(f"{API_BASE_URL}/schedule-comparison/", headers=get_auth_headers(), timeout=30)
                         pr = requests.get(f"{API_BASE_URL}/optimize-schedule-preview/",
                                           params={'local_opt_machines': prev_opt},
-                                          timeout=120)
+                                          headers=get_auth_headers(), timeout=120)
                         if cr.ok and pr.ok:
                             st.session_state.compare_current = cr.json().get('current_schedule', {})
                             st.session_state.compare_preview = pr.json().get('preview_kpis', {})
@@ -1798,7 +1897,7 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
                 with st.spinner("Fetching schedule from API…"):
                     try:
                         r2 = requests.get(f"{API_BASE_URL}/get-schedule/",
-                                          params={'page_size': 5000}, timeout=30)
+                                          params={'page_size': 5000}, headers=get_auth_headers(), timeout=30)
                         if r2.ok:
                             raw_rows = r2.json().get('results', [])
                             # Normalize to gantt bar format
@@ -2067,7 +2166,7 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
                 }
                 try:
                     r = requests.post(f"{API_BASE_URL}/generate-schedule/",
-                                      json=payload, timeout=30)
+                                      json=payload, headers=get_auth_headers(), timeout=30)
                     if r.status_code in (200, 201, 202):
                         task_id = r.json().get('task_id')
                         if task_id:
@@ -2083,6 +2182,199 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
                 except Exception as e:
                     st.error(f"Connection error: {e}")
 
+
+# ===========================================================================
+# PAGE – Filter Data (Products, Machines, Schedule, Date, Batch, Duration, Step, DCC Type)
+# ===========================================================================
+
+elif page == "📋 Filter Data":
+    st.title("📋 Filter Data")
+    st.markdown("""
+    <div style='background:#1a2a3a;border-left:4px solid #4facfe;padding:14px 18px;border-radius:6px;margin-bottom:18px;'>
+    <b style='color:#4facfe'>Filter schedule and production data</b><br>
+    <span style='color:#ccc'>
+    Use the filters below to narrow down by <b>Machine(s)</b>, <b>Product(s)</b>, <b>Date range</b>,
+    <b>Batch size</b>, <b>Duration</b>, <b>Process step</b>, and <b>DCC type</b> (from Product model).
+    </span></div>
+    """, unsafe_allow_html=True)
+
+    filter_options = fetch_data("get-filter-options")
+    if not filter_options:
+        st.warning("Could not load filter options. Ensure the backend is running and data is initialized.")
+        st.stop()
+
+    machines = filter_options.get("machines", [])
+    products = filter_options.get("products", [])
+    dcc_types = filter_options.get("dcc_types", [])
+    date_range = filter_options.get("date_range", {})
+
+    min_date = date_range.get("min")
+    max_date = date_range.get("max")
+    if min_date:
+        min_date = pd.to_datetime(min_date).date()
+    if max_date:
+        max_date = pd.to_datetime(max_date).date()
+    if not min_date:
+        min_date = date.today()
+    if not max_date:
+        max_date = date.today()
+
+    with st.expander("🔍 Filters", expanded=True):
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.subheader("Schedule & machine")
+            selected_machines = st.multiselect(
+                "Machines",
+                options=machines,
+                default=[],
+                help="Select one or more machines (from Machine model)",
+            )
+            start_date = st.date_input(
+                "Start date (schedule start_time)",
+                value=min_date,
+                min_value=min_date,
+                max_value=max_date,
+                help="Filter operations that start on or after this date",
+            )
+            end_date = st.date_input(
+                "End date (schedule end_time)",
+                value=max_date,
+                min_value=min_date,
+                max_value=max_date,
+                help="Filter operations that end on or before this date",
+            )
+            step_filter = st.selectbox(
+                "Process step (exact)",
+                options=["— Any —"] + [str(i) for i in range(1, 101)],
+                index=0,
+                help="Filter by ProcessStep.step_number",
+            )
+
+        with c2:
+            st.subheader("Product & batch")
+            product_options = ["All"] + [
+                f"Item {p['item']}: {p['description'][:40]}{'…' if len(p.get('description','')) > 40 else ''}"
+                for p in products
+            ]
+            selected_product_label = st.multiselect(
+                "Products (Item : description)",
+                options=product_options,
+                default=[],
+                help="From Product model (item, description, demand_2024, batch_size, num_batches)",
+            )
+            dcc_type_filter = st.selectbox(
+                "DCC type (Product)",
+                options=["— Any —"] + (dcc_types or []),
+                index=0,
+                help="Product.dcc_type",
+            )
+            batch_size_min = st.number_input(
+                "Batch size (min)",
+                min_value=0,
+                value=0,
+                step=10,
+                help="ProductionSchedule.batch_size ≥",
+            )
+            batch_size_max = st.number_input(
+                "Batch size (max)",
+                min_value=0,
+                value=0,
+                step=10,
+                help="0 = no max. ProductionSchedule.batch_size ≤",
+            )
+            duration_min = st.number_input(
+                "Duration hours (min)",
+                min_value=0.0,
+                value=0.0,
+                step=0.5,
+                format="%.2f",
+                help="Operation duration_hours ≥",
+            )
+            duration_max = st.number_input(
+                "Duration hours (max)",
+                min_value=0.0,
+                value=0.0,
+                step=0.5,
+                format="%.2f",
+                help="0 = no max. Operation duration_hours ≤",
+            )
+
+    if st.button("▶️ Apply filters & load data", type="primary", key="filter_data_apply"):
+        params = {
+            "page": 1,
+            "page_size": 2000,
+        }
+        if selected_machines:
+            params["machines"] = ",".join(selected_machines)
+        if selected_product_label and "All" not in selected_product_label:
+            items = []
+            for label in selected_product_label:
+                try:
+                    item = int(label.split(":")[0].replace("Item", "").strip())
+                    items.append(item)
+                except (ValueError, AttributeError):
+                    continue
+            if items:
+                params["products"] = ",".join(map(str, items))
+        if start_date:
+            params["start"] = start_date.isoformat()
+        if end_date:
+            # Include full end day (end_time <= 23:59:59)
+            params["end"] = f"{end_date.isoformat()}T23:59:59.999999"
+        if step_filter and step_filter != "— Any —":
+            params["step"] = step_filter
+        if dcc_type_filter and dcc_type_filter != "— Any —":
+            params["dcc_type"] = dcc_type_filter
+        if batch_size_min and batch_size_min > 0:
+            params["batch_size_min"] = batch_size_min
+        if batch_size_max and batch_size_max > 0:
+            params["batch_size_max"] = batch_size_max
+        if duration_min and duration_min > 0:
+            params["duration_min"] = duration_min
+        if duration_max and duration_max > 0:
+            params["duration_max"] = duration_max
+
+        r = requests.get(
+            f"{API_BASE_URL}/get-schedule/",
+            params=params,
+            headers=get_auth_headers(),
+            timeout=60,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            st.session_state["filter_data_results"] = data
+            st.session_state["filter_data_params"] = params
+            st.success(f"✅ Found **{data.get('count', 0):,}** operations.")
+        else:
+            st.error(f"Error {r.status_code}: {r.text}")
+
+    if "filter_data_results" in st.session_state:
+        data = st.session_state["filter_data_results"]
+        results = data.get("results", [])
+        total_count = data.get("count", 0)
+
+        st.markdown("---")
+        st.subheader(f"📊 Filtered results ({total_count:,} operations)")
+
+        if results:
+            df = pd.DataFrame(results)
+            if "start" in df.columns and "end" in df.columns:
+                df["start"] = pd.to_datetime(df["start"], format="ISO8601", utc=True).dt.tz_localize(None).dt.strftime("%Y-%m-%d %H:%M")
+                df["end"] = pd.to_datetime(df["end"], format="ISO8601", utc=True).dt.tz_localize(None).dt.strftime("%Y-%m-%d %H:%M")
+            if "duration_h" in df.columns:
+                df["duration_h"] = df["duration_h"].round(4)
+            st.dataframe(df, use_container_width=True, height=450)
+
+            st.download_button(
+                "📥 Download filtered data (CSV)",
+                data=df.to_csv(index=False),
+                file_name="filtered_schedule.csv",
+                mime="text/csv",
+                key="filter_download_csv",
+            )
+        else:
+            st.info("No rows match the current filters.")
 
 # ===========================================================================
 # PAGE 3 – Buffer Optimization
@@ -2108,7 +2400,7 @@ elif page == "📊 Buffer Optimization":
             if total_budget > 0:
                 params['total_budget'] = total_budget
             r = requests.get(f"{API_BASE_URL}/buffer-optimization/",
-                             params=params, timeout=30)
+                             params=params, headers=get_auth_headers(), timeout=30)
             if r.status_code == 200:
                 data = r.json()
                 if 'buffer_recommendations' in data and data['buffer_recommendations']:
@@ -2200,7 +2492,7 @@ elif page == "🔍 Bottleneck Analysis":
 
     if st.session_state.get('load_bottleneck', False):
         try:
-            r = requests.get(f"{API_BASE_URL}/bottleneck-analysis/", timeout=30)
+            r = requests.get(f"{API_BASE_URL}/bottleneck-analysis/", headers=get_auth_headers(), timeout=30)
             if r.status_code == 200:
                 data = r.json()
                 if 'machine_analysis' in data and data['machine_analysis']:
