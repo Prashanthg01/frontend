@@ -80,6 +80,9 @@ _defaults = {
     'tbl_page':           1,
     'tbl_loaded':         False,
     'timeline_data':      None,
+    'init_data_task_id':  None,
+    'init_data_task_done': True,
+    'init_data_result':   None,
     # Auth
     'auth_token':         None,
     'username':           None,
@@ -892,6 +895,100 @@ elif page == "📅 Schedule Management":
                 machines to minimise makespan. Runs async via Celery.
         </span></div>""", unsafe_allow_html=True)
 
+        st.markdown("### 📥 Initialize Data from CSV")
+        st.caption("Upload Frontpage and Process CSV files to refresh products, machines, and routing data.")
+        init_c1, init_c2 = st.columns(2)
+        with init_c1:
+            frontpage_file = st.file_uploader(
+                "Frontpage CSV",
+                type=["csv"],
+                key="schedule_frontpage_csv",
+            )
+        with init_c2:
+            process_file = st.file_uploader(
+                "Process CSV",
+                type=["csv"],
+                key="schedule_process_csv",
+            )
+
+        init_async_mode = st.checkbox(
+            "Run initialization in background",
+            value=True,
+            key="schedule_init_async_mode",
+        )
+        init_clicked = st.button(
+            "Initialize Data",
+            use_container_width=True,
+            key="schedule_initialize_data_btn",
+        )
+
+        if init_clicked:
+            if not frontpage_file or not process_file:
+                st.warning("Please upload both Frontpage CSV and Process CSV files.")
+            else:
+                with st.spinner("Uploading files and initializing data..."):
+                    try:
+                        frontpage_file.seek(0)
+                        process_file.seek(0)
+                        r = requests.post(
+                            f"{API_BASE_URL}/initialize-data/",
+                            files={
+                                "frontpage": (frontpage_file.name, frontpage_file, "text/csv"),
+                                "process": (process_file.name, process_file, "text/csv"),
+                            },
+                            data={"async_mode": str(init_async_mode).lower()},
+                            headers=get_auth_headers(),
+                            timeout=120,
+                        )
+                        if r.status_code == 401:
+                            st.session_state.auth_token = None
+                            st.session_state.username = None
+                            st.error("Session expired. Please log in again.")
+                            st.rerun()
+
+                        if r.status_code in (200, 201, 202):
+                            payload = r.json()
+                            if r.status_code == 202 and payload.get("task_id"):
+                                st.session_state.init_data_task_id = payload["task_id"]
+                                st.session_state.init_data_task_done = False
+                                st.session_state.init_data_result = None
+                                st.success(f"Initialization started. Task ID: `{payload['task_id']}`")
+                            else:
+                                st.session_state.init_data_task_id = None
+                                st.session_state.init_data_task_done = True
+                                st.session_state.init_data_result = payload
+                                st.success(payload.get("message", "Database initialized successfully."))
+                        else:
+                            st.error(f"Error {r.status_code}: {r.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+
+        init_task_id = st.session_state.get("init_data_task_id")
+        if init_task_id and not st.session_state.get("init_data_task_done", True):
+            st.markdown("#### ⏳ Data Initialization Progress")
+            init_pb = st.progress(0)
+            init_txt = st.empty()
+            init_result = poll_task_until_complete(
+                init_task_id,
+                init_pb,
+                init_txt,
+                max_wait_seconds=600,
+            )
+            if init_result:
+                st.session_state.init_data_result = init_result
+                st.session_state.init_data_task_done = True
+
+        init_result = st.session_state.get("init_data_result")
+        if isinstance(init_result, dict):
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Products", init_result.get("products_created", "—"))
+            m2.metric("Machines", init_result.get("machines_created", "—"))
+            m3.metric("Process Steps", init_result.get("process_steps_created", "—"))
+            if init_result.get("message"):
+                st.success(init_result["message"])
+
+        st.markdown("---")
+
         g1, g2, g3, g4 = st.columns(4)
         with g1:
             start_date = st.date_input("📅 Schedule Start Date", value=date.today(),
@@ -1037,6 +1134,7 @@ elif page == "📅 Schedule Management":
         if st.button("🔄 Load / Refresh Gantt", type="primary"):
             params = {'max_bars': max_bars}
             if sel_machines:
+                params['machines'] = ','.join(sel_machines)
                 params['machines'] = ','.join(sel_machines)
             with st.spinner("Fetching Gantt data…"):
                 try:
