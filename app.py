@@ -83,6 +83,11 @@ _defaults = {
     'init_data_task_id':  None,
     'init_data_task_done': True,
     'init_data_result':   None,
+    # ── NEW: Batch Optimization ──────────────────────────────────────
+    'batch_preview_result':  None,
+    'batch_preview_task_id': None,
+    'batch_save_result':     None,
+    'batch_save_task_id':    None,
     # Auth
     'auth_token':         None,
     'username':           None,
@@ -203,7 +208,6 @@ def post_data(endpoint, data=None):
 
 def post_files(endpoint, files_dict, data_dict=None):
     try:
-        # multipart: auth header only; requests sends form + files
         r = requests.post(
             f"{API_BASE_URL}/{endpoint}/",
             files=files_dict,
@@ -286,7 +290,6 @@ def _product_color(color_key: int) -> str:
 def _to_naive_utc(dt: datetime) -> datetime:
     """Strip timezone info, converting to UTC first if tz-aware."""
     if dt.tzinfo is not None:
-        # Convert to UTC then remove tzinfo
         dt = dt.utctimetuple()
         dt = datetime(*dt[:6])
     return dt
@@ -299,12 +302,6 @@ def _parse_iso(s: str) -> datetime:
 
 
 def _compute_gaps_from_bars(bars: list) -> dict:
-    """
-    Pure-frontend gap analysis — no extra API call needed.
-    Works on already-loaded gantt_data bars.
-    Each bar must have: machine, start (ISO str), end (ISO str),
-                        product, step, batch_id
-    """
     from collections import defaultdict as _dd
     machine_ops = _dd(list)
     for b in bars:
@@ -373,7 +370,7 @@ def build_gantt_figure(gantt_data: dict, height: int = 600) -> go.Figure:
 
     fig           = go.Figure()
     seen_products = set()
-    _epoch        = datetime(1970, 1, 1)   # always naive
+    _epoch        = datetime(1970, 1, 1)
 
     for bar in bars:
         product  = bar['product']
@@ -445,7 +442,7 @@ def _render_task_progress(task_id: str, api_url: str):
     progress_bar = st.progress(0)
     status_text  = st.empty()
 
-    for _ in range(150):   # ~5 min at 2-second polls
+    for _ in range(150):
         try:
             resp = requests.get(f"{api_url}/task-status/{task_id}/", headers=get_auth_headers(), timeout=10)
             if not resp.ok:
@@ -495,17 +492,20 @@ def _render_task_progress(task_id: str, api_url: str):
 
 
 # ===========================================================================
-# NAVIGATION
+# NAVIGATION  ← NEW: "📦 Batch Optimization" added
 # ===========================================================================
 
 st.sidebar.title("🏭 Production Suite")
 page = st.sidebar.radio(
     "Navigate",
-    ["📊 Production Analytics",
-     "📅 Schedule Management",
-     "📋 Filter Data",
-     "📊 Buffer Optimization",
-     "🔍 Bottleneck Analysis"],
+    [
+        "📊 Production Analytics",
+        "📅 Schedule Management",
+        "📦 Batch Optimization",      # ← NEW
+        "📋 Filter Data",
+        "📊 Buffer Optimization",
+        "🔍 Bottleneck Analysis",
+    ],
     key="navigation"
 )
 st.sidebar.markdown("---")
@@ -638,7 +638,6 @@ if page == "📊 Production Analytics":
             fg_vals   = [float(v.replace(',','')) for v in fg_str]
             conn_vals = [float(v.replace(',','')) for v in conn_str]
 
-            # ── Finished Goods summary cards ──────────────────────────
             st.markdown('<div class="section-header">🎯 Finished Goods</div>',
                         unsafe_allow_html=True)
             c1, c2, c3, c4 = st.columns(4)
@@ -666,7 +665,6 @@ if page == "📊 Production Analytics":
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # ── Connectors summary cards ───────────────────────────────
             st.markdown('<div class="section-header">🔌 Connectors</div>',
                         unsafe_allow_html=True)
             c5, c6, c7, c8 = st.columns(4)
@@ -1084,7 +1082,7 @@ elif page == "📅 Schedule Management":
                 'start_date':         start_date.isoformat(),
                 'local_opt_machines': local_opt,
                 'clear_existing':     clear_existing,
-                'enable_compaction':  enable_compaction,   # ← gap elimination flag
+                'enable_compaction':  enable_compaction,
                 'batch_overrides':    st.session_state.batch_overrides,
                 'async_mode':         True,
             }
@@ -1134,7 +1132,6 @@ elif page == "📅 Schedule Management":
         if st.button("🔄 Load / Refresh Gantt", type="primary"):
             params = {'max_bars': max_bars}
             if sel_machines:
-                params['machines'] = ','.join(sel_machines)
                 params['machines'] = ','.join(sel_machines)
             with st.spinner("Fetching Gantt data…"):
                 try:
@@ -1186,7 +1183,6 @@ elif page == "📅 Schedule Management":
         st.subheader("🕐 Timeline View")
         st.markdown("Visual step-by-step schedule per machine — mirrors the Production Schedule Dashboard layout.")
 
-        # ── Controls ─────────────────────────────────────────────────
         tl1, tl2, tl3, tl4 = st.columns([2, 1, 1, 1])
         with tl1:
             try:
@@ -1209,21 +1205,18 @@ elif page == "📅 Schedule Management":
                 options=[1, 5, 15, 30, 60, 120],
                 index=1,
                 format_func=lambda x: f"{x} min",
-                help="Timeline tick interval (default 5 min). Canvas width = tick count × spacing.",
+                help="Timeline tick interval (default 5 min).",
             )
             tl_opt_goal = st.radio("Optimisation Goal",
                                    ["Minimize Makespan", "Maximize Throughput"],
                                    index=0)
 
         if st.button("🔄 Load Timeline", type="primary"):
-            # Use get-schedule endpoint (always available) with gantt format
-            # Fall back gracefully if schedule-gantt is registered
             params = {'max_bars': 2000, 'page_size': 2000, 'format': 'gantt'}
             if sel_tl_machines:
                 params['machines'] = ','.join(sel_tl_machines)
             with st.spinner("Loading timeline data…"):
                 loaded = False
-                # Try schedule-gantt first
                 try:
                     r = requests.get(f"{API_BASE_URL}/schedule-gantt/",
                                      params=params, headers=get_auth_headers(), timeout=30)
@@ -1233,7 +1226,6 @@ elif page == "📅 Schedule Management":
                 except Exception:
                     pass
 
-                # Fallback: build gantt-compatible payload from get-schedule
                 if not loaded:
                     try:
                         r2 = requests.get(f"{API_BASE_URL}/get-schedule/",
@@ -1242,15 +1234,12 @@ elif page == "📅 Schedule Management":
                         if r2.ok:
                             raw   = r2.json()
                             rows  = raw.get('results', [])
-                            # Build colour_key map by product
                             prods = sorted(set(row['product'] for row in rows))
                             cmap  = {p: i for i, p in enumerate(prods)}
-                            # Attach color_key and ensure fields match gantt schema
                             for row in rows:
                                 row['color_key'] = cmap.get(row['product'], 0)
                                 row['batch_num'] = row.get('batch_num', 1)
                                 row['batch_id']  = row.get('batch_id', '')
-                            # Compute date range
                             starts = [row['start'] for row in rows if row.get('start')]
                             ends   = [row['end']   for row in rows if row.get('end')]
                             st.session_state.timeline_data = {
@@ -1263,7 +1252,6 @@ elif page == "📅 Schedule Management":
                                 'total_bars': len(rows),
                                 'truncated':  False,
                             }
-                            # Deduplicate machines, preserve order
                             seen_m = set()
                             machine_list = []
                             for row in rows:
@@ -1283,28 +1271,23 @@ elif page == "📅 Schedule Management":
         if td and td.get('gantt_bars'):
             bars_all  = td['gantt_bars']
             machines  = sel_tl_machines if sel_tl_machines else td.get('machines', [])
-
-            # Filter to selected machines
             bars_all = [b for b in bars_all if not sel_tl_machines or b['machine'] in sel_tl_machines]
 
             if not bars_all:
                 st.info("No operations found for selected machines.")
             else:
-                # ── Compute timeline window ───────────────────────────
                 all_starts = [_parse_iso(b['start']) for b in bars_all]
                 all_ends   = [_parse_iso(b['end'])   for b in bars_all]
                 t_min      = min(all_starts)
                 t_max      = max(all_ends)
                 span_hrs   = max((t_max - t_min).total_seconds() / 3600, 1)
 
-                # Parse user time-range hint (used for x-axis label alignment)
                 try:
                     h_start = int(tl_time_start.split(':')[0])
                     h_end   = int(tl_time_end.split(':')[0])
                 except Exception:
                     h_start, h_end = 8, 20
 
-                # ── Build colour map by product ───────────────────────
                 products_uniq = sorted(set(b['product'] for b in bars_all))
                 clr = ['#4facfe','#00f2fe','#11998e','#38ef7d','#f093fb',
                        '#f5576c','#fda085','#f6d365','#a18cd1','#fbc2eb',
@@ -1312,13 +1295,11 @@ elif page == "📅 Schedule Management":
                        '#764ba2','#ff6b6b','#feca57','#48dbfb','#ff9ff3']
                 prod_color = {p: clr[i % len(clr)] for i, p in enumerate(products_uniq)}
 
-                # ── Group bars by machine ─────────────────────────────
                 machine_bars = {m: [] for m in machines}
                 for b in bars_all:
                     if b['machine'] in machine_bars:
                         machine_bars[b['machine']].append(b)
 
-                # ── KPI sidebar data ──────────────────────────────────
                 total_ops   = len(bars_all)
                 total_dur   = sum(b['duration_h'] for b in bars_all)
                 kpi_data_tl = st.session_state.get('kpi_data') or {}
@@ -1327,20 +1308,17 @@ elif page == "📅 Schedule Management":
                 n_setups    = len(set(b['batch_id'] for b in bars_all))
                 throughput  = kpi_data_tl.get('throughput_units_per_day', 0) or 0
 
-                # ── Layout constants (compact) ────────────────────────
-                LABEL_W    = 140     # px – frozen machine-name column
-                ROW_H      = 44     # px – height of each machine row
-                TRACK_PAD  = 4      # px – top/bottom padding inside track
+                LABEL_W    = 140
+                ROW_H      = 44
+                TRACK_PAD  = 4
                 BAR_H      = ROW_H - TRACK_PAD * 2
-                TICK_SPACING_PX = 40   # px between timeline ticks (drives canvas width)
-                # Time interval: ticks every time_interval_minutes; CANVAS_W = tick count × spacing
+                TICK_SPACING_PX = 40
                 n_ticks = int(span_hrs * 60 / time_interval_minutes) + 1
-                n_ticks = min(max(n_ticks, 2), 500)   # cap for huge/short spans
+                n_ticks = min(max(n_ticks, 2), 500)
                 CANVAS_W = (n_ticks - 1) * TICK_SPACING_PX
-                CANVAS_W = max(CANVAS_W, 400)         # minimum width
-                PX_PER_HR = CANVAS_W / span_hrs       # bar positions from this
+                CANVAS_W = max(CANVAS_W, 400)
+                PX_PER_HR = CANVAS_W / span_hrs
 
-                # ── KPI panel ─────────────────────────────────────────
                 kpi_items = [
                     ("Total Makespan",   f"{makespan_h:.1f} h"),
                     ("Total Operations", f"{total_ops:,}"),
@@ -1371,7 +1349,6 @@ elif page == "📅 Schedule Management":
                     <div class='util-pct'>{util_pct:.1f}%</div>
                   </div>"""
 
-                # ── Tick marks: one per time_interval_minutes; position = i × TICK_SPACING_PX ──
                 tick_items = []
                 for i in range(n_ticks):
                     tick_hrs = i * (time_interval_minutes / 60)
@@ -1380,27 +1357,24 @@ elif page == "📅 Schedule Management":
                     tick_px  = i * TICK_SPACING_PX
                     tick_items.append((tick_px, tick_lbl))
 
-                # Tick marks for the header row (absolute inside canvas)
                 tick_header_html = "".join(
                     f"<div style='position:absolute;left:{px:.1f}px;"
                     f"transform:translateX(-50%);color:#9ca3af;font-size:11px;"
                     f"white-space:nowrap;top:4px;'>{lbl}</div>"
                     for px, lbl in tick_items
                 )
-                # Vertical grid lines inside each track
                 grid_lines_html = "".join(
                     f"<div style='position:absolute;left:{px:.1f}px;top:0;bottom:0;"
                     f"width:1px;background:rgba(255,255,255,0.06);'></div>"
                     for px, _ in tick_items
                 )
 
-                # ── Machine rows (pixel-based positioning) ────────────
                 rows_html = ""
                 for ri, machine in enumerate(machines):
                     mbars    = machine_bars.get(machine, [])
                     safe_m   = machine.replace("'", "&#39;").replace('"', '&quot;')
                     row_bg   = '#111a11' if ri % 2 == 0 else '#0e1a0e'
-                    bar_blocks = grid_lines_html   # grid lines in every row
+                    bar_blocks = grid_lines_html
 
                     if not mbars:
                         bar_blocks += (f"<div style='position:absolute;left:50%;top:50%;"
@@ -1424,7 +1398,6 @@ elif page == "📅 Schedule Management":
                                    f"{be_dt.strftime('%H:%M')} ({dur_b:.2f} h)"
                                    ).replace("'", "&#39;")
                             opacity  = 1.0 if b.get('batch_num', 1) % 2 == 1 else 0.75
-                            # show step number always; name only if bar is wide enough
                             inner_label = (f"<div class='bar-step'>Step {step_no}</div>"
                                            f"<div class='bar-name'>{step_nm[:18]}</div>"
                                            if width_px > 60 else
@@ -1446,7 +1419,6 @@ elif page == "📅 Schedule Management":
                       </div>
                     </div>"""
 
-                # ── Legend ────────────────────────────────────────────
                 legend_html = "".join(
                     f"<div class='legend-item'>"
                     f"<div class='legend-dot' style='background:{col};'></div>"
@@ -1454,7 +1426,6 @@ elif page == "📅 Schedule Management":
                     for prod, col in list(prod_color.items())[:20]
                 )
 
-                # ── Tabular view ──────────────────────────────────────
                 def _step_in_slot(mbars, slot_idx, total_slots):
                     slot_s = slot_idx * (span_hrs / total_slots)
                     slot_e = (slot_idx + 1) * (span_hrs / total_slots)
@@ -1482,11 +1453,9 @@ elif page == "📅 Schedule Management":
                         f"<td class='td-machine'>{machine}</td>{cells}</tr>"
                     )
 
-                # ── Heights (compact) ──────────────────────────────────
                 gantt_scroll_h = min(420, max(180, len(machines) * ROW_H + 24))
                 total_iframe_h = gantt_scroll_h + len(machines) * 40 + 380
 
-                # ── Full HTML document ────────────────────────────────
                 full_html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -1500,8 +1469,6 @@ body {{
   padding:8px 10px;
   font-size:12px;
 }}
-
-/* ── Layout (compact) ─────────────────────────────── */
 .page-title  {{ font-size:16px;font-weight:700;color:#fff;margin-bottom:1px; }}
 .page-sub    {{ font-size:11px;color:#6b7280;margin-bottom:10px; }}
 .outer       {{ display:flex;gap:10px;align-items:flex-start; }}
@@ -1511,8 +1478,6 @@ body {{
   background:#0d1f0d;border:1px solid #1a3a1a;
   border-radius:6px;padding:10px 12px;
 }}
-
-/* ── KPI panel ───────────────────────────────────── */
 .kpi-title   {{ color:#00ff9f;font-size:12px;font-weight:700;
                margin-bottom:8px;letter-spacing:.3px; }}
 .kpi-row     {{ display:flex;justify-content:space-between;align-items:center;
@@ -1529,8 +1494,6 @@ body {{
                overflow:hidden; }}
 .util-fill   {{ height:6px;border-radius:3px;transition:width .3s; }}
 .util-pct    {{ color:#6b7280;font-size:9px;text-align:right;margin-top:1px; }}
-
-/* ── Gantt chart (compact) ───────────────────────── */
 .gantt-wrap  {{
   border:1px solid #1f2f1f;border-radius:6px;overflow:hidden;
 }}
@@ -1551,7 +1514,6 @@ body {{
   position:relative;height:22px;
   width:{CANVAS_W}px;
 }}
-
 .gantt-scroll {{
   overflow:auto;
   max-height:{gantt_scroll_h}px;
@@ -1586,13 +1548,11 @@ body {{
 .bar-name {{ font-size:8px;color:rgba(255,255,255,.8);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   max-width:100%;line-height:1.1; }}
-
 .legend      {{ display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;
                padding-top:8px;border-top:1px solid #1a2a1a; }}
 .legend-item {{ display:flex;align-items:center;gap:4px;font-size:10px;
                color:#9ca3af; }}
 .legend-dot  {{ width:10px;height:10px;border-radius:2px;flex-shrink:0; }}
-
 .tab-section {{ margin-top:12px; }}
 .tab-title   {{ color:#00ff9f;font-size:11px;font-weight:700;
                text-transform:uppercase;letter-spacing:.8px;
@@ -1620,7 +1580,6 @@ td           {{
 tr:hover td  {{ background:#111e11 !important; }}
 </style>
 <script>
-// Sync header-ticks scroll with gantt-scroll
 document.addEventListener('DOMContentLoaded', function() {{
   var scroll = document.getElementById('gantt-scroll');
   var hticks = document.getElementById('header-ticks');
@@ -1633,17 +1592,11 @@ document.addEventListener('DOMContentLoaded', function() {{
 </script>
 </head>
 <body>
-
 <div class='page-title'>Production Schedule Dashboard</div>
 <div class='page-sub'>Optimized Machine Time Allocation</div>
-
 <div class='outer'>
-
-  <!-- ── LEFT: Gantt + table ── -->
   <div class='left-panel'>
-
     <div class='gantt-wrap'>
-      <!-- Frozen header -->
       <div class='gantt-header'>
         <div class='header-label'>Machine</div>
         <div class='header-ticks' id='header-ticks' style='overflow:hidden;'>
@@ -1652,19 +1605,13 @@ document.addEventListener('DOMContentLoaded', function() {{
           </div>
         </div>
       </div>
-
-      <!-- Scrollable body -->
       <div class='gantt-scroll' id='gantt-scroll'>
         {rows_html}
       </div>
     </div>
-
-    <!-- Legend -->
     <div class='legend'>
       {legend_html}
     </div>
-
-    <!-- Tabular view -->
     <div class='tab-section'>
       <div class='tab-title'>📋 Tabular View</div>
       <div class='tab-scroll'>
@@ -1682,18 +1629,14 @@ document.addEventListener('DOMContentLoaded', function() {{
         </table>
       </div>
     </div>
-
-  </div><!-- /left-panel -->
-
-  <!-- ── RIGHT: KPI Panel ── -->
+  </div>
   <div class='kpi-panel'>
     <div class='kpi-title'>📊 KPIs</div>
     {kpi_rows_html}
     <div class='sec-title'>Machine Util.</div>
     {util_bars_html}
   </div>
-
-</div><!-- /outer -->
+</div>
 </body>
 </html>"""
 
@@ -1763,7 +1706,7 @@ document.addEventListener('DOMContentLoaded', function() {{
             except Exception as e:
                 st.error(f"Connection error: {e}")
 
-    # ── TAB 4 – KPIs ──────────────────────────────────────────────────
+    # ── TAB 5 – KPIs ──────────────────────────────────────────────────
     with tab_kpi:
         st.subheader("📈 Schedule KPIs")
 
@@ -1850,7 +1793,7 @@ document.addEventListener('DOMContentLoaded', function() {{
         else:
             st.info("Click **Refresh KPIs** to load schedule performance metrics.")
 
-    # ── TAB 5 – Comparison ────────────────────────────────────────────
+    # ── TAB 6 – Comparison ────────────────────────────────────────────
     with tab_compare:
         st.subheader("🔄 Schedule Comparison")
         st.markdown(
@@ -1924,44 +1867,23 @@ document.addEventListener('DOMContentLoaded', function() {{
     with tab_optimize:
         st.subheader("🎯 Gap Analysis & Elimination")
 
-        # ── Why gaps happen ───────────────────────────────────────────
         with st.expander("📖 Why do gaps appear? (click to learn)", expanded=False):
             st.markdown("""
 **Three root causes create the idle gaps you see on machines like Cutting Automation and SKM Seal:**
 
 **① Precedence-induced starvation** — A machine finishes its current job and is free,
 but the *next operation waiting for it* belongs to a batch whose upstream step (on a
-different machine) has not finished yet. The machine sits idle until that upstream step
-completes — even though other machines may be busy.
-
-```
-Cutting Automation is free at t=1h
-But Product 3 Batch 2, Step 3 can't start until Step 2 (Connector Assembly) finishes at t=3h
-→ 2h idle gap, even though Cutting Automation is doing nothing
-```
+different machine) has not finished yet.
 
 **② Batch-interleaving gaps** — Different products share a machine. When Product A's
-last batch finishes, Product B's next batch isn't ready yet (its upstream steps haven't
-finished on other machines). The machine waits.
+last batch finishes, Product B's next batch isn't ready yet.
 
 **③ SPT ordering mismatches** — The greedy dispatcher sorts all operations by shortest
-processing time globally. This means a machine might process batches in an order
-(Batch 7 → Batch 2 → Batch 15) that doesn't match the order their upstream jobs
-complete, creating "arrival gaps".
+processing time globally, creating "arrival gaps".
 
-**The fix — Left-Shift Compaction:**
-After the greedy schedule is built, slide every operation as early as possible:
-```
-for each operation O (sorted by start time):
-    earliest = max(machine_free_after[O.machine], upstream_step_done[O.job])
-    if earliest < O.start:
-        O.start = earliest  # slide left, fill the gap
-repeat until nothing moves (2–3 passes, completes in <1s)
-```
-Enable **Gap Elimination** in the Generate tab, then regenerate.
+**The fix — Left-Shift Compaction:** Enable **Gap Elimination** in the Generate tab.
             """)
 
-        # ── Load data source ──────────────────────────────────────────
         st.markdown("#### 📊 Load Schedule Data for Analysis")
         ga_src = st.radio(
             "Data source",
@@ -1988,9 +1910,9 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
                     if bars:
                         st.success(f"Using {len(bars):,} bars from loaded Gantt data.")
                     else:
-                        st.warning("No gantt bars in loaded data. Try loading Gantt first.")
+                        st.warning("No gantt bars in loaded data.")
                 else:
-                    st.warning("No Gantt data loaded. Switch to **Gantt Chart** tab → Load first.")
+                    st.warning("No Gantt data loaded. Switch to Gantt Chart tab first.")
             else:
                 with st.spinner("Fetching schedule from API…"):
                     try:
@@ -1998,7 +1920,6 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
                                           params={'page_size': 5000}, headers=get_auth_headers(), timeout=30)
                         if r2.ok:
                             raw_rows = r2.json().get('results', [])
-                            # Normalize to gantt bar format
                             prods = sorted(set(row.get('product','') for row in raw_rows))
                             cmap  = {p: i for i, p in enumerate(prods)}
                             bars  = [{
@@ -2021,9 +1942,8 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
 
             if bars:
                 st.session_state.gap_analysis = _compute_gaps_from_bars(bars)
-                st.session_state['_gap_bars']  = bars   # keep for Gantt render
+                st.session_state['_gap_bars']  = bars
 
-        # ── Display results ───────────────────────────────────────────
         ga = st.session_state.get('gap_analysis')
         if not ga:
             st.markdown("""
@@ -2037,34 +1957,27 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
               </div>
             </div>""", unsafe_allow_html=True)
         else:
-            # ── Summary KPIs ──────────────────────────────────────────
             st.markdown("---")
             gm1, gm2, gm3, gm4 = st.columns(4)
-            gm1.metric("Total Idle Gaps",      ga['total_gaps'],
-                       help="Gaps > 1 minute across all machines")
-            gm2.metric("Total Idle Time",       f"{ga['total_idle_hours']:.1f} h")
-            gm3.metric("Worst Machine",         ga['worst_machine'])
-            gm4.metric("Gap-Free Machines",     ga['clean_machines'])
+            gm1.metric("Total Idle Gaps",  ga['total_gaps'])
+            gm2.metric("Total Idle Time",  f"{ga['total_idle_hours']:.1f} h")
+            gm3.metric("Worst Machine",    ga['worst_machine'])
+            gm4.metric("Gap-Free Machines", ga['clean_machines'])
 
-            # ── Cause breakdown ───────────────────────────────────────
             causes = ga['causes']
             total_c = sum(causes.values()) or 1
             st.markdown("#### 🔬 Gap Cause Breakdown")
             cc1, cc2, cc3 = st.columns(3)
             cc1.metric("① Precedence-induced",
                        f"{causes['precedence']} gaps",
-                       f"{causes['precedence']/total_c*100:.0f}% of gaps",
-                       help="Machine free but upstream step not done yet")
+                       f"{causes['precedence']/total_c*100:.0f}% of gaps")
             cc2.metric("② Batch-interleaving",
                        f"{causes['interleave']} gaps",
-                       f"{causes['interleave']/total_c*100:.0f}% of gaps",
-                       help="Different products competing for same machine")
+                       f"{causes['interleave']/total_c*100:.0f}% of gaps")
             cc3.metric("③ SPT ordering",
                        f"{causes['spt']} gaps",
-                       f"{causes['spt']/total_c*100:.0f}% of gaps",
-                       help="SPT reordering leaves holes before upstream jobs arrive")
+                       f"{causes['spt']/total_c*100:.0f}% of gaps")
 
-            # ── Machine idle bar chart ────────────────────────────────
             st.markdown("#### 📊 Idle Time by Machine")
             df_ms = pd.DataFrame(ga['machine_stats'])
             if not df_ms.empty:
@@ -2076,11 +1989,9 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
                 idle_fig = go.Figure()
                 idle_fig.add_trace(go.Bar(
                     x=df_ms['machine'], y=df_ms['idle_hours'],
-                    name='Idle Hours',
-                    marker_color=bar_colors,
+                    name='Idle Hours', marker_color=bar_colors,
                     text=[f"{v:.2f}h" for v in df_ms['idle_hours']],
                     textposition='auto',
-                    hovertemplate='<b>%{x}</b><br>Idle: %{y:.2f}h<extra></extra>',
                 ))
                 idle_fig.add_trace(go.Scatter(
                     x=df_ms['machine'], y=df_ms['gap_count'],
@@ -2088,7 +1999,6 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
                     mode='markers+lines',
                     marker=dict(color='#a78bfa', size=9, symbol='diamond'),
                     line=dict(color='#a78bfa', width=2, dash='dot'),
-                    hovertemplate='<b>%{x}</b><br>Gaps: %{y}<extra></extra>',
                 ))
                 idle_fig.update_layout(
                     template='plotly_dark', height=380,
@@ -2102,101 +2012,6 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
                 idle_fig.update_xaxes(tickangle=30)
                 st.plotly_chart(idle_fig, use_container_width=True)
 
-            # ── Gap Gantt with red idle markers ──────────────────────
-            st.markdown("#### 🗓 Schedule with Gaps Highlighted")
-            st.caption("Red/orange blocks = idle gaps. Hover for details.")
-
-            bars_for_gantt = st.session_state.get('_gap_bars', [])
-            if bars_for_gantt:
-                # Re-use build_gantt_figure for operation bars
-                machines_in_gap = sorted(set(b['machine'] for b in bars_for_gantt))
-                prods_g = sorted(set(str(b.get('product','')) for b in bars_for_gantt))
-                cmap_g  = {p: i for i, p in enumerate(prods_g)}
-                _epoch  = datetime(1970, 1, 1)
-
-                gfig = go.Figure()
-                seen_p = set()
-                _CLRS = px.colors.qualitative.Plotly + px.colors.qualitative.D3
-                for b in bars_for_gantt:
-                    prod  = str(b.get('product', ''))
-                    s_dt  = _parse_iso(b['start'])
-                    e_dt  = _parse_iso(b['end'])
-                    dur_h = (e_dt - s_dt).total_seconds() / 3600
-                    base  = (s_dt - _epoch).total_seconds() / 3600
-                    color = _CLRS[cmap_g.get(prod, 0) % len(_CLRS)]
-                    show  = prod not in seen_p; seen_p.add(prod)
-                    gfig.add_trace(go.Bar(
-                        name=f"P{prod}", x=[dur_h], y=[b['machine']],
-                        orientation='h', base=[base], marker_color=color,
-                        opacity=0.78, showlegend=show, legendgroup=prod,
-                        hovertemplate=(
-                            f"<b>P{prod}</b> Step {b.get('step')}<br>"
-                            f"{s_dt.strftime('%H:%M')} – {e_dt.strftime('%H:%M')}<br>"
-                            f"{dur_h:.2f}h<extra></extra>"
-                        ),
-                    ))
-
-                # Overlay red gap blocks
-                first_gap = True
-                for gap in ga['gap_list']:
-                    gs  = _parse_iso(gap['gap_start'])
-                    ge  = _parse_iso(gap['gap_end'])
-                    dur = (ge - gs).total_seconds() / 3600
-                    base = (gs - _epoch).total_seconds() / 3600
-                    cause_colors = {
-                        'precedence': 'rgba(239,68,68,0.60)',
-                        'interleave': 'rgba(245,158,11,0.60)',
-                        'spt':        'rgba(167,139,250,0.60)',
-                    }
-                    gfig.add_trace(go.Bar(
-                        name='Gap (idle)' if first_gap else '_gap',
-                        x=[dur], y=[gap['machine']],
-                        orientation='h', base=[base],
-                        marker_color=cause_colors.get(gap['cause'], 'rgba(239,68,68,0.5)'),
-                        marker_line=dict(color='rgba(255,255,255,0.4)', width=1),
-                        showlegend=first_gap, legendgroup='_gap',
-                        hovertemplate=(
-                            f"<b>⏸ GAP — {gap['machine']}</b><br>"
-                            f"Idle {gap['idle_hours']:.3f}h<br>"
-                            f"Cause: <b>{gap['cause']}</b><br>"
-                            f"{gap['before_op']} → {gap['after_op']}<extra></extra>"
-                        ),
-                    ))
-                    first_gap = False
-
-                # X axis ticks
-                all_s = [_parse_iso(b['start']) for b in bars_for_gantt]
-                all_e = [_parse_iso(b['end'])   for b in bars_for_gantt]
-                t0h = (min(all_s) - _epoch).total_seconds() / 3600
-                t1h = (max(all_e) - _epoch).total_seconds() / 3600
-                span_d = (t1h - t0h) / 24
-                tstep  = 24 if span_d <= 3 else 12 if span_d <= 7 else 7*24
-                tvals  = list(range(int(t0h), int(t1h) + 1, tstep))
-                ttxt   = [(_epoch + pd.Timedelta(hours=h)).strftime('%b %d %H:%M')
-                          for h in tvals]
-                gfig.update_layout(
-                    template='plotly_dark',
-                    height=max(480, 52 * len(machines_in_gap) + 140),
-                    barmode='overlay',
-                    title='Gantt with Gap Overlay (red=precedence, amber=interleave, purple=SPT)',
-                    xaxis=dict(title='Time', tickvals=tvals, ticktext=ttxt,
-                               range=[t0h, t1h], showgrid=True, gridcolor='#2a2a2a'),
-                    yaxis=dict(title='Machine', autorange='reversed',
-                               showgrid=True, gridcolor='#1a1a1a'),
-                    legend=dict(title='', orientation='v', x=1.01, y=1),
-                    margin=dict(l=200, r=160, t=70, b=60),
-                )
-                st.plotly_chart(gfig, use_container_width=True)
-
-                # Colour legend explanation
-                st.markdown("""
-                <div style='display:flex;gap:20px;font-size:12px;margin-top:-8px;margin-bottom:12px;'>
-                  <span><span style='display:inline-block;width:14px;height:14px;background:rgba(239,68,68,0.7);border-radius:3px;vertical-align:middle;margin-right:5px;'></span>Red = Precedence gap</span>
-                  <span><span style='display:inline-block;width:14px;height:14px;background:rgba(245,158,11,0.7);border-radius:3px;vertical-align:middle;margin-right:5px;'></span>Amber = Batch-interleave gap</span>
-                  <span><span style='display:inline-block;width:14px;height:14px;background:rgba(167,139,250,0.7);border-radius:3px;vertical-align:middle;margin-right:5px;'></span>Purple = SPT-ordering gap</span>
-                </div>""", unsafe_allow_html=True)
-
-            # ── Detailed gap table ────────────────────────────────────
             with st.expander(f"📋 Full Gap List ({ga['total_gaps']} gaps)"):
                 df_gl = pd.DataFrame(ga['gap_list'])
                 if not df_gl.empty:
@@ -2213,36 +2028,11 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
                     st.download_button(
                         "📥 Download Gap Report (CSV)",
                         data=df_gl.to_csv(index=False),
-                        file_name="gap_analysis.csv",
-                        mime="text/csv",
+                        file_name="gap_analysis.csv", mime="text/csv",
                     )
 
-            # ── Fix CTA ───────────────────────────────────────────────
             st.markdown("---")
             st.markdown("### 🔧 Fix These Gaps")
-            st.markdown("""
-            <div style='background:#0a1f0a;border:1px solid #166534;border-radius:8px;
-                        padding:16px 20px;margin-bottom:18px;'>
-              <div style='color:#22c55e;font-weight:700;font-size:15px;margin-bottom:8px;'>
-                ✅ Left-Shift Compaction eliminates most gaps in seconds
-              </div>
-              <div style='color:#9ca3af;font-size:13px;line-height:1.6;'>
-                <b style='color:#d1fae5'>How it works:</b> After the greedy scheduler runs,
-                every operation is slid as early as possible on its machine — respecting
-                precedence (step N+1 after step N) and no-overlap constraints. Typically
-                converges in 2–3 passes. Expected improvement: <b style='color:#22c55e'>
-                60–90% gap reduction</b>.<br><br>
-                <b style='color:#d1fae5'>To apply:</b>
-                Go to <b>⚙️ Generate Schedule</b> tab →
-                check <b>🔀 Enable Gap Elimination</b> →
-                click <b>🚀 Generate Schedule</b>.<br>
-                Your backend <code>generate-schedule</code> API will receive
-                <code>"enable_compaction": true</code> in the request body.
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Quick-launch button
             fc1, fc2 = st.columns([3, 1])
             with fc1:
                 fix_date = st.date_input("Start date for re-schedule",
@@ -2273,8 +2063,6 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
                             st.session_state.gap_analysis       = None
                             st.success(f"✅ Gap-elimination schedule submitted — Task `{task_id}`")
                             st.info("Switch to **⚙️ Generate Schedule** tab to watch progress.")
-                        else:
-                            st.success("Schedule generated synchronously with gap elimination.")
                     else:
                         st.error(f"Error {r.status_code}: {r.text}")
                 except Exception as e:
@@ -2282,7 +2070,848 @@ Enable **Gap Elimination** in the Generate tab, then regenerate.
 
 
 # ===========================================================================
-# PAGE – Filter Data (Products, Machines, Schedule, Date, Batch, Duration, Step, DCC Type)
+# PAGE 3 – Batch Optimization  ← NEW PAGE
+# ===========================================================================
+
+elif page == "📦 Batch Optimization":
+    st.title("📦 Batch Size Optimization")
+
+    # ── Info banner ────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div style='background:#1a2a3a;border-left:4px solid #4facfe;
+                padding:14px 18px;border-radius:6px;margin-bottom:18px;'>
+    <b style='color:#4facfe'>ℹ️ Two Optimization Modes</b><br>
+    <span style='color:#ccc'>
+    <b style='color:#00f2fe'>Individual ILP</b> — optimises each product independently,
+    minimising the number of batches subject to size constraints.<br>
+    <b style='color:#38ef7d'>Joint ILP (new)</b> — optimises ALL products simultaneously,
+    minimising the <i>worst machine load</i> (makespan proxy) to balance utilisation
+    across all machines and avoid bottlenecks.
+    </span></div>
+    """, unsafe_allow_html=True)
+
+    # ── Adaptive bounds explanation (the bug fix) ──────────────────────────────
+    with st.expander("⚠️ Why min/max batch size is applied adaptively (important)", expanded=False):
+        st.markdown("""
+**Problem with fixed global bounds:**
+
+Your products span a very wide demand range — from **100 units** to **319,908 units**.
+A fixed `min_batch=50, max_batch=500` causes two failure modes:
+
+| Demand | Issue | What happened before fix |
+|--------|-------|--------------------------|
+| 121 | `max_batch=500 > demand=121` → ILP was forced to pick batch=500 for 1 batch, ignoring that only 121 units are needed | `new_batch_size=500, new_num_batches=1` ❌ |
+| 319,908 | `ceil(319908/n) > 500` for **every** n ∈ [1..25] → ILP had no feasible solution at all | Fell back to naive heuristic ❌ |
+
+**The fix — adaptive bounds per product:**
+```
+true_min = ceil(demand / max_num_batches)   # smallest batch using all slots
+true_max = demand                            # one big batch (N=1)
+
+effective_min = max(user_min, true_min)
+effective_max = min(user_max, true_max)
+
+if effective_min > effective_max:            # user bounds incompatible with demand
+    use (true_min, true_max) instead
+```
+Your `min_batch_size` and `max_batch_size` parameters are now treated as **preferences**.
+The ILP clamps them to what is actually achievable for each product's demand level.
+        """)
+
+    st.markdown("---")
+
+    # ── Parameters ─────────────────────────────────────────────────────────────
+    st.markdown("### ⚙️ Optimization Parameters")
+    bp1, bp2, bp3, bp4 = st.columns(4)
+    with bp1:
+        max_num_batches = st.number_input(
+            "Max number of batches", min_value=1, max_value=100, value=25,
+            help="Upper bound for N in the ILP"
+        )
+    with bp2:
+        min_batch_size = st.number_input(
+            "Min batch size (preferred)", min_value=1, max_value=100000, value=50,
+            help="Preferred minimum units per batch. Applied where feasible for the product's demand."
+        )
+    with bp3:
+        max_batch_size = st.number_input(
+            "Max batch size (preferred)", min_value=1, max_value=1000000, value=500,
+            help="Preferred maximum units per batch. Clamped to demand when demand < this value."
+        )
+    with bp4:
+        batch_async = st.checkbox(
+            "Run async (Celery)", value=False,
+            help="Use background task for large product catalogs"
+        )
+
+    params = {
+        "max_num_batches": int(max_num_batches),
+        "min_batch_size":  int(min_batch_size),
+        "max_batch_size":  int(max_batch_size),
+    }
+
+    st.markdown("---")
+
+    # ── Page tabs ──────────────────────────────────────────────────────────────
+    tab_indiv, tab_joint = st.tabs([
+        "🔢 Individual Optimization",
+        "🤝 Joint Optimization (balance machine loads)",
+    ])
+
+    # ==========================================================================
+    # TAB 1 — Individual ILP (existing, with adaptive bounds fix)
+    # ==========================================================================
+    with tab_indiv:
+        st.markdown("""
+        <div style='background:#0d1a2d;border-left:3px solid #4facfe;
+                    padding:8px 14px;border-radius:4px;font-size:12px;
+                    color:#93c5fd;margin-bottom:14px;'>
+        Optimises each product independently. Objective: minimise number of batches N
+        while keeping batch size within adaptive bounds. Fast — runs product-by-product.
+        </div>
+        """, unsafe_allow_html=True)
+
+        ia1, ia2 = st.columns(2)
+        with ia1:
+            indiv_preview = st.button(
+                "🔍 Preview (no DB write)",
+                type="primary", use_container_width=True
+            )
+        with ia2:
+            indiv_save = st.button(
+                "💾 Save to Database",
+                type="secondary", use_container_width=True
+            )
+
+        # ── Preview ───────────────────────────────────────────────────────────
+        if indiv_preview:
+            _params_async = {**params, "async_mode": "true" if batch_async else "false"}
+            if batch_async:
+                with st.spinner("Submitting preview task…"):
+                    try:
+                        r = requests.get(
+                            f"{API_BASE_URL}/batch-optimization-preview/",
+                            params=_params_async, headers=get_auth_headers(), timeout=30
+                        )
+                        if r.status_code == 202:
+                            st.session_state.batch_preview_task_id = r.json().get("task_id")
+                            st.session_state.batch_preview_result  = None
+                            st.success(f"Task submitted: `{st.session_state.batch_preview_task_id}`")
+                        else:
+                            st.error(f"Error {r.status_code}: {r.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+            else:
+                with st.spinner("Running ILP for all products…"):
+                    try:
+                        r = requests.get(
+                            f"{API_BASE_URL}/batch-optimization-preview/",
+                            params=params, headers=get_auth_headers(), timeout=300
+                        )
+                        if r.status_code == 200:
+                            st.session_state.batch_preview_result  = r.json()
+                            st.session_state.batch_preview_task_id = None
+                            st.success("✅ Preview complete!")
+                        else:
+                            st.error(f"Error {r.status_code}: {r.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+
+        btask = st.session_state.get("batch_preview_task_id")
+        if btask:
+            st.markdown("#### ⏳ Preview Task")
+            pb  = st.progress(0)
+            txt = st.empty()
+            res = poll_task_until_complete(btask, pb, txt, max_wait_seconds=600)
+            if res:
+                st.session_state.batch_preview_result  = res
+                st.session_state.batch_preview_task_id = None
+                st.rerun()
+
+        # ── Save ──────────────────────────────────────────────────────────────
+        if indiv_save:
+            if batch_async:
+                with st.spinner("Submitting save task…"):
+                    try:
+                        r = requests.post(
+                            f"{API_BASE_URL}/batch-optimization-save/",
+                            json={**params, "async_mode": "true"},
+                            headers=get_auth_headers(), timeout=30
+                        )
+                        if r.status_code == 202:
+                            st.session_state.batch_save_task_id = r.json().get("task_id")
+                            st.session_state.batch_save_result  = None
+                            st.success(f"Save task: `{st.session_state.batch_save_task_id}`")
+                        else:
+                            st.error(f"Error {r.status_code}: {r.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+            else:
+                with st.spinner("Applying to database…"):
+                    try:
+                        r = requests.post(
+                            f"{API_BASE_URL}/batch-optimization-save/",
+                            json=params, headers=get_auth_headers(), timeout=300
+                        )
+                        if r.status_code == 200:
+                            st.session_state.batch_save_result  = r.json()
+                            st.session_state.batch_save_task_id = None
+                            st.success("✅ Saved!")
+                        else:
+                            st.error(f"Error {r.status_code}: {r.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+
+        stask = st.session_state.get("batch_save_task_id")
+        if stask:
+            st.markdown("#### ⏳ Save Task")
+            pb2  = st.progress(0)
+            txt2 = st.empty()
+            res2 = poll_task_until_complete(stask, pb2, txt2, max_wait_seconds=600)
+            if res2:
+                st.session_state.batch_save_result  = res2
+                st.session_state.batch_save_task_id = None
+                st.rerun()
+
+        # ── Save result banner ────────────────────────────────────────────────
+        save_result = st.session_state.get("batch_save_result")
+        if isinstance(save_result, dict) and save_result.get("status") != "error":
+            upd  = save_result.get("total_updated", 0)
+            skip = save_result.get("total_skipped", 0)
+            st.markdown(f"""
+            <div style='background:#0a2a0a;border-left:4px solid #22c55e;
+                        padding:14px 18px;border-radius:6px;margin:12px 0;'>
+            <b style='color:#22c55e'>✅ Database Updated</b><br>
+            <span style='color:#ccc'>
+            <b style='color:#86efac'>{upd}</b> products updated &nbsp;|&nbsp;
+            <b style='color:#fca5a5'>{skip}</b> skipped
+            </span></div>
+            """, unsafe_allow_html=True)
+            updated_list = save_result.get("updated_products", [])
+            if updated_list:
+                with st.expander(f"📋 {len(updated_list)} updated products"):
+                    df_upd = pd.DataFrame(updated_list)
+                    df_upd["Batch Size Δ"]   = df_upd["new_batch_size"]  - df_upd["old_batch_size"]
+                    df_upd["Num Batches Δ"]  = df_upd["new_num_batches"] - df_upd["old_num_batches"]
+                    st.dataframe(df_upd, use_container_width=True, height=300)
+                    st.download_button("📥 CSV", data=df_upd.to_csv(index=False),
+                                       file_name="indiv_batch_updates.csv", mime="text/csv")
+
+        # ── Preview results ───────────────────────────────────────────────────
+        preview = st.session_state.get("batch_preview_result")
+        if not preview:
+            st.info("Click **🔍 Preview** to run the individual ILP and see results.")
+        else:
+            summary  = preview.get("summary", {})
+            analysis = preview.get("batch_analysis", [])
+
+            st.markdown("---")
+            st.markdown("### 📊 Individual Optimization Results")
+
+            sm1, sm2, sm3, sm4, sm5 = st.columns(5)
+            sm1.metric("Products",       summary.get("total_products", 0))
+            sm2.metric("Total Demand",   f"{summary.get('total_demand', 0):,}")
+            sm3.metric("Total Batches",  summary.get("total_batches", 0))
+            sm4.metric("Avg Batch Size", summary.get("avg_batch_size", 0))
+            sm5.metric("Std Dev",        summary.get("std_batch_size", 0))
+
+            # Adaptive bounds note
+            if summary.get("note"):
+                st.info(f"ℹ️ {summary['note']}")
+
+            if analysis:
+                df_a = pd.DataFrame(analysis)
+                df_a["improvement_pct"] = (
+                    df_a["improvement"]
+                    .str.replace("%", "", regex=False)
+                    .astype(float)
+                )
+                df_a["batch_reduction"]   = df_a["old_num_batches"] - df_a["new_num_batches"]
+                df_a["batch_size_change"] = df_a["new_batch_size"]  - df_a["old_batch_size"]
+
+                ptab1, ptab2, ptab3, ptab4 = st.tabs([
+                    "📈 Charts", "📋 Full Table", "🏆 Top Improvements", "🔬 ILP Detail"
+                ])
+
+                with ptab1:
+                    df_top20 = df_a.nlargest(20, "demand")
+
+                    st.markdown("#### Batch Count: Old (12) vs New — top 20 by demand")
+                    fig_bc = go.Figure()
+                    fig_bc.add_trace(go.Bar(name="Old (12)", x=df_top20["item"].astype(str),
+                                            y=df_top20["old_num_batches"], marker_color="#4facfe"))
+                    fig_bc.add_trace(go.Bar(name="New (ILP)", x=df_top20["item"].astype(str),
+                                            y=df_top20["new_num_batches"], marker_color="#00f2fe"))
+                    fig_bc.update_layout(barmode="group", template="plotly_dark", height=380,
+                                          xaxis_title="Item", yaxis_title="# Batches",
+                                          legend=dict(orientation="h", y=1.1))
+                    st.plotly_chart(fig_bc, use_container_width=True)
+
+                    st.markdown("#### Batch Size: Old vs New vs Ideal")
+                    fig_bs = go.Figure()
+                    fig_bs.add_trace(go.Scatter(name="Old", x=df_top20["item"].astype(str),
+                                                y=df_top20["old_batch_size"],
+                                                mode="lines+markers", line=dict(color="#f59e0b")))
+                    fig_bs.add_trace(go.Scatter(name="New", x=df_top20["item"].astype(str),
+                                                y=df_top20["new_batch_size"],
+                                                mode="lines+markers", line=dict(color="#22c55e")))
+                    fig_bs.add_trace(go.Scatter(name="Ideal", x=df_top20["item"].astype(str),
+                                                y=df_top20["ideal_batch_size"],
+                                                mode="lines", line=dict(color="#a78bfa", dash="dot")))
+                    fig_bs.update_layout(template="plotly_dark", height=360,
+                                          xaxis_title="Item", yaxis_title="Batch Size",
+                                          legend=dict(orientation="h", y=1.1))
+                    st.plotly_chart(fig_bs, use_container_width=True)
+
+                    # Effective bounds annotation
+                    if "effective_min_batch" in df_a.columns:
+                        st.markdown("#### Adaptive Bounds Applied")
+                        bounds_fig = go.Figure()
+                        bounds_fig.add_trace(go.Bar(
+                            name="Eff. Min Batch", x=df_a["item"].astype(str),
+                            y=df_a["effective_min_batch"], marker_color="rgba(239,68,68,0.5)"
+                        ))
+                        bounds_fig.add_trace(go.Bar(
+                            name="New Batch Size", x=df_a["item"].astype(str),
+                            y=df_a["new_batch_size"], marker_color="#22c55e"
+                        ))
+                        bounds_fig.add_trace(go.Bar(
+                            name="Eff. Max Batch", x=df_a["item"].astype(str),
+                            y=df_a["effective_max_batch"], marker_color="rgba(59,130,246,0.4)"
+                        ))
+                        bounds_fig.update_layout(
+                            barmode="overlay", template="plotly_dark", height=340,
+                            title="Adaptive Bounds vs Chosen Batch Size (each product)",
+                            xaxis_title="Item", yaxis_title="Units",
+                            legend=dict(orientation="h", y=1.1),
+                        )
+                        st.plotly_chart(bounds_fig, use_container_width=True)
+
+                    c_l, c_r = st.columns(2)
+                    with c_l:
+                        fig_hist = px.histogram(df_a, x="improvement_pct", nbins=20,
+                                                 color_discrete_sequence=["#4facfe"],
+                                                 template="plotly_dark",
+                                                 title="Improvement Distribution (%)")
+                        fig_hist.update_layout(height=280)
+                        st.plotly_chart(fig_hist, use_container_width=True)
+                    with c_r:
+                        fig_sc = px.scatter(df_a, x="demand", y="batch_reduction",
+                                             color="improvement_pct",
+                                             color_continuous_scale="Viridis",
+                                             template="plotly_dark",
+                                             hover_data=["item", "new_batch_size"],
+                                             title="Demand vs Batch Reduction")
+                        fig_sc.update_layout(height=280)
+                        st.plotly_chart(fig_sc, use_container_width=True)
+
+                with ptab2:
+                    display_cols = [
+                        "item", "description", "demand",
+                        "old_batch_size", "old_num_batches",
+                        "new_batch_size", "new_num_batches",
+                        "ideal_batch_size", "improvement",
+                        "batch_reduction", "batch_size_change",
+                    ]
+                    if "effective_min_batch" in df_a.columns:
+                        display_cols += ["effective_min_batch", "effective_max_batch"]
+
+                    df_display = df_a[display_cols].copy()
+
+                    def _color_impr(val):
+                        try:
+                            v = float(str(val).replace("%", ""))
+                            if v > 30: return "background:#14532d;color:#86efac"
+                            if v > 10: return "background:#1a3a0a;color:#bef264"
+                            if v > 0:  return "background:#1a2a0a;color:#d9f99d"
+                        except Exception:
+                            pass
+                        return ""
+
+                    st.dataframe(
+                        df_display.style.applymap(_color_impr, subset=["improvement"]),
+                        use_container_width=True, height=500
+                    )
+                    st.download_button("📥 Download CSV",
+                                       data=df_display.to_csv(index=False),
+                                       file_name="indiv_preview.csv", mime="text/csv")
+
+                with ptab3:
+                    df_top10 = df_a.nlargest(10, "improvement_pct")
+                    for _, row in df_top10.iterrows():
+                        impr  = row["improvement_pct"]
+                        color = "#22c55e" if impr > 30 else "#f59e0b" if impr > 10 else "#6b7280"
+                        st.markdown(f"""
+                        <div style='background:#0d1a0d;border-left:4px solid {color};
+                                    border-radius:6px;padding:10px 16px;margin-bottom:8px;
+                                    display:flex;justify-content:space-between;'>
+                          <div>
+                            <b style='color:#d1d5db'>Item {int(row["item"])}</b>
+                            <span style='color:#6b7280;font-size:12px;margin-left:8px;'>
+                              {str(row["description"])[:45]}
+                            </span><br>
+                            <span style='color:#9ca3af;font-size:11px;'>
+                              Demand: {int(row["demand"]):,}
+                            </span>
+                          </div>
+                          <div style='text-align:right;'>
+                            <b style='color:{color};font-size:16px;'>{impr:.1f}%</b><br>
+                            <span style='color:#9ca3af;font-size:11px;'>
+                              {int(row["old_num_batches"])}→{int(row["new_num_batches"])} batches &nbsp;|&nbsp;
+                              {int(row["old_batch_size"])}→{int(row["new_batch_size"])} units/batch
+                            </span>
+                          </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    df_zero = df_a[df_a["improvement_pct"] == 0]
+                    if not df_zero.empty:
+                        st.markdown(f"#### ⚪ {len(df_zero)} products unchanged")
+                        st.dataframe(df_zero[["item", "description", "demand",
+                                              "old_batch_size", "new_batch_size"]],
+                                     use_container_width=True, height=200)
+
+                with ptab4:
+                    st.markdown("#### ILP Formulation")
+                    st.json({
+                        "solver": "PuLP (CBC)",
+                        "objective": "Minimize N (number of batches per product)",
+                        "adaptive_bounds": {
+                            "effective_min": "max(user_min, ceil(demand/max_num_batches))",
+                            "effective_max": "min(user_max, demand)",
+                            "fallback": "use (ceil(demand/max_N), demand) if intersection empty"
+                        },
+                        "variables": {
+                            "B": "batch_size ∈ [eff_min, eff_max] integer",
+                            "N": f"num_batches ∈ [1, {int(max_num_batches)}] integer",
+                            "y_n": f"binary selector n ∈ [1..{int(max_num_batches)}]"
+                        },
+                        "key_constraints": [
+                            "sum(y_n) == 1",
+                            "N == sum(n*y_n)",
+                            "B >= ceil(demand/n) - M*(1-y_n)  ∀n",
+                            "y_n == 0 if ceil(demand/n) > eff_max"
+                        ],
+                        "parameters_used": params
+                    })
+
+    # ==========================================================================
+    # TAB 2 — Joint Multi-Product ILP (NEW)
+    # ==========================================================================
+    with tab_joint:
+        st.markdown("""
+        <div style='background:#0d200d;border-left:3px solid #38ef7d;
+                    padding:8px 14px;border-radius:4px;font-size:12px;
+                    color:#86efac;margin-bottom:14px;'>
+        Optimises ALL products simultaneously in a single MILP.
+        Objective: <b>minimise C</b> (the worst machine load hours — the bottleneck).
+        Machine-load constraints link batch decisions across products,
+        producing a balanced schedule rather than per-product greedy choices.
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Why joint matters visual ───────────────────────────────────────────
+        with st.expander("📖 Why Joint Optimization? (visual explanation)", expanded=False):
+            st.markdown("""
+**Before (Individual, independent optimization):**
+```
+Machine 1: ████████████████████████ 95%  ← BOTTLENECK
+Machine 2: ████                      20%  ← IDLE
+Machine 3: ██████                    30%
+```
+Each product's ILP ignores other products' machine use.
+Product A and B both independently decide to use Machine 1 heavily.
+
+**After (Joint optimization):**
+```
+Machine 1: ██████████████  65%
+Machine 2: █████████████   60%
+Machine 3: ████████████    55%
+```
+The joint MILP sees all machine constraints at once. It shifts some products
+to use different batch counts so no single machine becomes overloaded.
+
+**Result:** Lower makespan → faster total production → better schedule quality.
+
+**MILP Formulation:**
+```
+Minimize  C                                    ← worst machine load (hours)
+
+For each product i:
+  Σ_n  y_{i,n}  =  1                          ← exactly one batch count chosen
+  y_{i,n}  ∈  {0,1}
+
+For each machine m:
+  Σ_{i,n}  load_{i,m,n} × y_{i,n}  ≤  C      ← all machine loads ≤ C
+
+where  load_{i,m,n}  =  cycle_time_{i,m} × ceil(demand_i/n) × n  /  3600
+```
+            """)
+
+        # ── Solver time limit control ──────────────────────────────────────────
+        jt1, jt2 = st.columns(2)
+        with jt1:
+            time_limit = st.number_input(
+                "Solver time limit (seconds)", min_value=10,
+                max_value=600, value=120,
+                help="CBC will stop and return best solution found within this time"
+            )
+        with jt2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.info(
+                f"Joint ILP size: ~{int(max_num_batches)} × products binary vars. "
+                "For 39 products this is ~975 binaries — typically solved in <30s."
+            )
+
+        ja1, ja2 = st.columns(2)
+        with ja1:
+            joint_preview_btn = st.button(
+                "🔍 Joint Preview (no DB write)",
+                type="primary", use_container_width=True
+            )
+        with ja2:
+            joint_save_btn = st.button(
+                "💾 Joint Save to Database",
+                type="secondary", use_container_width=True
+            )
+
+        # ── Joint Preview ──────────────────────────────────────────────────────
+        if joint_preview_btn:
+            if batch_async:
+                with st.spinner("Submitting joint preview task…"):
+                    try:
+                        r = requests.get(
+                            f"{API_BASE_URL}/batch-optimization-joint-preview/",
+                            params={**params, "async_mode": "true"},
+                            headers=get_auth_headers(), timeout=30
+                        )
+                        if r.status_code == 202:
+                            st.session_state.joint_preview_task_id = r.json().get("task_id")
+                            st.session_state.joint_preview_result  = None
+                            st.success(f"Task: `{st.session_state.joint_preview_task_id}`")
+                        else:
+                            st.error(f"Error {r.status_code}: {r.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+            else:
+                with st.spinner(f"Running joint MILP (up to {time_limit}s)…"):
+                    try:
+                        r = requests.get(
+                            f"{API_BASE_URL}/batch-optimization-joint-preview/",
+                            params=params, headers=get_auth_headers(),
+                            timeout=time_limit + 60
+                        )
+                        if r.status_code == 200:
+                            st.session_state.joint_preview_result  = r.json()
+                            st.session_state.joint_preview_task_id = None
+                            st.success("✅ Joint preview complete!")
+                        else:
+                            st.error(f"Error {r.status_code}: {r.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+
+        jptask = st.session_state.get("joint_preview_task_id")
+        if jptask:
+            st.markdown("#### ⏳ Joint Preview Task")
+            jpb  = st.progress(0)
+            jtxt = st.empty()
+            jres = poll_task_until_complete(jptask, jpb, jtxt, max_wait_seconds=600)
+            if jres:
+                st.session_state.joint_preview_result  = jres
+                st.session_state.joint_preview_task_id = None
+                st.rerun()
+
+        # ── Joint Save ─────────────────────────────────────────────────────────
+        if joint_save_btn:
+            if batch_async:
+                with st.spinner("Submitting joint save task…"):
+                    try:
+                        r = requests.post(
+                            f"{API_BASE_URL}/batch-optimization-joint/",
+                            json={**params, "async_mode": "true"},
+                            headers=get_auth_headers(), timeout=30
+                        )
+                        if r.status_code == 202:
+                            st.session_state.joint_save_task_id = r.json().get("task_id")
+                            st.session_state.joint_save_result  = None
+                            st.success(f"Task: `{st.session_state.joint_save_task_id}`")
+                        else:
+                            st.error(f"Error {r.status_code}: {r.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+            else:
+                with st.spinner(f"Running joint MILP and saving (up to {time_limit}s)…"):
+                    try:
+                        r = requests.post(
+                            f"{API_BASE_URL}/batch-optimization-joint/",
+                            json=params, headers=get_auth_headers(),
+                            timeout=time_limit + 60
+                        )
+                        if r.status_code == 200:
+                            st.session_state.joint_save_result  = r.json()
+                            st.session_state.joint_save_task_id = None
+                            st.success("✅ Joint optimization saved to database!")
+                        else:
+                            st.error(f"Error {r.status_code}: {r.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+
+        jstask = st.session_state.get("joint_save_task_id")
+        if jstask:
+            st.markdown("#### ⏳ Joint Save Task")
+            jsb  = st.progress(0)
+            jst  = st.empty()
+            jsr  = poll_task_until_complete(jstask, jsb, jst, max_wait_seconds=600)
+            if jsr:
+                st.session_state.joint_save_result  = jsr
+                st.session_state.joint_save_task_id = None
+                st.rerun()
+
+        # ── Joint Save result banner ───────────────────────────────────────────
+        j_save = st.session_state.get("joint_save_result")
+        if isinstance(j_save, dict) and j_save.get("status") != "error":
+            upd = j_save.get("products_updated", 0)
+            st.markdown(f"""
+            <div style='background:#0a2a0a;border-left:4px solid #22c55e;
+                        padding:14px 18px;border-radius:6px;margin:12px 0;'>
+            <b style='color:#22c55e'>✅ Joint Optimization Applied to Database</b><br>
+            <span style='color:#ccc'>
+            <b style='color:#86efac'>{upd}</b> products updated &nbsp;|&nbsp;
+            Makespan proxy: <b style='color:#38ef7d'>{j_save.get("makespan_proxy", 0):.1f}h</b> &nbsp;|&nbsp;
+            Solver: <b>{j_save.get("status", "—")}</b>
+            </span></div>
+            """, unsafe_allow_html=True)
+
+        # ── Joint results display ──────────────────────────────────────────────
+        j_preview = (
+            st.session_state.get("joint_preview_result") or
+            st.session_state.get("joint_save_result")
+        )
+
+        if not j_preview:
+            st.markdown("""
+            <div style='text-align:center;padding:50px 20px;color:#4b5563;'>
+              <div style='font-size:52px;'>🤝</div>
+              <div style='font-size:15px;font-weight:600;color:#6b7280;margin:10px 0;'>
+                No joint optimization loaded yet
+              </div>
+              <div style='font-size:12px;'>
+                Click <b>🔍 Joint Preview</b> to run the multi-product MILP
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            analysis      = j_preview.get("batch_analysis", [])
+            machine_loads = j_preview.get("machine_loads", {})
+            summary       = j_preview.get("summary", {})
+            solver_status = j_preview.get("status", "unknown")
+
+            st.markdown("---")
+
+            # Solver status badge
+            badge_color = "#22c55e" if solver_status == "optimal" else "#f59e0b"
+            st.markdown(
+                f"<span style='background:{badge_color};color:#000;padding:4px 12px;"
+                f"border-radius:12px;font-size:12px;font-weight:700;'>"
+                f"Solver: {solver_status.upper()}</span>",
+                unsafe_allow_html=True
+            )
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── Summary KPIs ───────────────────────────────────────────────────
+            st.markdown("### 📊 Joint Optimization Summary")
+            jk1, jk2, jk3, jk4, jk5 = st.columns(5)
+            jk1.metric("Products",      summary.get("total_products", len(analysis)))
+            jk2.metric("Total Demand",  f"{summary.get('total_demand', 0):,}")
+            jk3.metric("Total Batches", summary.get("total_batches", 0))
+            jk4.metric("Makespan Proxy", f"{j_preview.get('makespan_proxy', 0):.1f}h",
+                        help="Max machine load hours — lower = more balanced")
+            jk5.metric("Avg Improvement", f"{summary.get('avg_improvement', 0):.1f}%")
+
+            # ── Machine load chart — the KEY chart ─────────────────────────────
+            if machine_loads:
+                st.markdown("### 🏭 Machine Load Balance After Joint Optimization")
+
+                ml_df = (
+                    pd.DataFrame(list(machine_loads.items()), columns=["Machine", "Load (h)"])
+                    .sort_values("Load (h)", ascending=False)
+                )
+                max_load = ml_df["Load (h)"].max()
+                min_load = ml_df["Load (h)"].min()
+
+                bar_colors = [
+                    "#ef4444" if v == max_load else
+                    "#22c55e" if v == min_load else "#4facfe"
+                    for v in ml_df["Load (h)"]
+                ]
+
+                ml_fig = go.Figure()
+                ml_fig.add_trace(go.Bar(
+                    x=ml_df["Machine"], y=ml_df["Load (h)"],
+                    marker_color=bar_colors,
+                    text=[f"{v:.1f}h" for v in ml_df["Load (h)"]],
+                    textposition="auto",
+                    hovertemplate="<b>%{x}</b><br>Load: %{y:.2f}h<extra></extra>",
+                ))
+                # Makespan proxy reference line
+                proxy = j_preview.get("makespan_proxy", 0)
+                if proxy > 0:
+                    ml_fig.add_hline(
+                        y=proxy, line_dash="dash", line_color="#f59e0b",
+                        annotation_text=f"Makespan proxy C={proxy:.1f}h",
+                        annotation_position="top right"
+                    )
+
+                ml_fig.update_layout(
+                    template="plotly_dark", height=400,
+                    title="Machine Load Hours (joint optimization result)",
+                    xaxis_title="Machine", yaxis_title="Load (hours)",
+                    margin=dict(b=100),
+                )
+                ml_fig.update_xaxes(tickangle=30)
+                st.plotly_chart(ml_fig, use_container_width=True)
+
+                # Load balance score
+                if max_load > 0:
+                    balance_pct = (1 - (max_load - min_load) / max_load) * 100
+                    st.markdown(f"""
+                    <div style='background:#0d1a0d;border:1px solid #1a3a1a;border-radius:6px;
+                                padding:10px 16px;margin:8px 0;font-size:13px;color:#9ca3af;'>
+                    <b style='color:#38ef7d'>Load Balance Score: {balance_pct:.1f}%</b>
+                    &nbsp; (100% = perfectly balanced, 0% = all load on one machine)<br>
+                    Bottleneck: <b style='color:#ef4444'>{ml_df.iloc[0]["Machine"]}</b>
+                    &nbsp;({ml_df.iloc[0]["Load (h)"]:.1f}h) &nbsp;|&nbsp;
+                    Most idle: <b style='color:#22c55e'>{ml_df.iloc[-1]["Machine"]}</b>
+                    &nbsp;({ml_df.iloc[-1]["Load (h)"]:.1f}h)
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            # ── Per-product results ────────────────────────────────────────────
+            if analysis:
+                df_j = pd.DataFrame(analysis)
+                if "improvement" in df_j.columns:
+                    df_j["improvement_pct"] = (
+                        df_j["improvement"]
+                        .str.replace("%", "", regex=False)
+                        .astype(float)
+                    )
+
+                jt1, jt2, jt3 = st.tabs([
+                    "📋 Product Results", "📈 Comparison Charts", "🔍 Source Breakdown"
+                ])
+
+                with jt1:
+                    st.markdown("#### Per-Product Joint Optimization Results")
+
+                    def _color_j(val):
+                        try:
+                            v = float(str(val).replace("%", ""))
+                            if v > 30: return "background:#14532d;color:#86efac"
+                            if v > 10: return "background:#1a3a0a;color:#bef264"
+                            if v > 0:  return "background:#1a2a0a;color:#d9f99d"
+                        except Exception:
+                            pass
+                        return ""
+
+                    display_j = df_j[[
+                        "item", "description", "demand",
+                        "old_batch_size", "old_num_batches",
+                        "new_batch_size", "new_num_batches",
+                        "ideal_batch_size", "improvement",
+                        "source",
+                    ]].copy()
+                    st.dataframe(
+                        display_j.style.applymap(_color_j, subset=["improvement"]),
+                        use_container_width=True, height=480
+                    )
+                    st.download_button("📥 Download CSV",
+                                       data=display_j.to_csv(index=False),
+                                       file_name="joint_batch_results.csv", mime="text/csv")
+
+                with jt2:
+                    df_top20j = df_j.nlargest(20, "demand")
+
+                    # Side-by-side batch count comparison
+                    fc1, fc2 = st.columns(2)
+                    with fc1:
+                        fig_jbc = go.Figure()
+                        fig_jbc.add_trace(go.Bar(name="Old", x=df_top20j["item"].astype(str),
+                                                  y=df_top20j["old_num_batches"],
+                                                  marker_color="#4facfe"))
+                        fig_jbc.add_trace(go.Bar(name="Joint ILP", x=df_top20j["item"].astype(str),
+                                                  y=df_top20j["new_num_batches"],
+                                                  marker_color="#38ef7d"))
+                        fig_jbc.update_layout(barmode="group", template="plotly_dark",
+                                               height=320, title="Batch Count (top 20)",
+                                               legend=dict(orientation="h", y=1.1))
+                        st.plotly_chart(fig_jbc, use_container_width=True)
+
+                    with fc2:
+                        fig_jbs = go.Figure()
+                        fig_jbs.add_trace(go.Scatter(name="Old", x=df_top20j["item"].astype(str),
+                                                      y=df_top20j["old_batch_size"],
+                                                      mode="lines+markers",
+                                                      line=dict(color="#f59e0b")))
+                        fig_jbs.add_trace(go.Scatter(name="Joint ILP", x=df_top20j["item"].astype(str),
+                                                      y=df_top20j["new_batch_size"],
+                                                      mode="lines+markers",
+                                                      line=dict(color="#38ef7d")))
+                        fig_jbs.update_layout(template="plotly_dark", height=320,
+                                               title="Batch Size (top 20)",
+                                               legend=dict(orientation="h", y=1.1))
+                        st.plotly_chart(fig_jbs, use_container_width=True)
+
+                    # Improvement histogram
+                    if "improvement_pct" in df_j.columns:
+                        fig_jimp = px.histogram(
+                            df_j, x="improvement_pct", nbins=20,
+                            color_discrete_sequence=["#38ef7d"],
+                            template="plotly_dark",
+                            title="Joint Improvement Distribution (%)",
+                            labels={"improvement_pct": "Batch Reduction (%)"}
+                        )
+                        fig_jimp.update_layout(height=280)
+                        st.plotly_chart(fig_jimp, use_container_width=True)
+
+                with jt3:
+                    if "source" in df_j.columns:
+                        src_counts = df_j["source"].value_counts().reset_index()
+                        src_counts.columns = ["Source", "Count"]
+
+                        color_map = {
+                            "joint_ilp": "#38ef7d",
+                            "fallback":  "#f59e0b",
+                            "skipped":   "#6b7280",
+                        }
+                        fig_src = px.pie(
+                            src_counts, values="Count", names="Source",
+                            color="Source", color_discrete_map=color_map,
+                            template="plotly_dark",
+                            title="Decision Source: How was each product's batch size chosen?"
+                        )
+                        fig_src.update_layout(height=320)
+                        st.plotly_chart(fig_src, use_container_width=True)
+
+                        st.markdown("""
+                        | Source | Meaning |
+                        |--------|---------|
+                        | `joint_ilp` | Solved optimally by the joint MILP |
+                        | `fallback` | ILP couldn't find optimal; used heuristic |
+                        | `skipped` | Zero demand — not included in optimization |
+                        """)
+
+            # ── Machine load CSV download ──────────────────────────────────────
+            if machine_loads:
+                ml_csv = pd.DataFrame(
+                    list(machine_loads.items()), columns=["machine", "load_hours"]
+                ).sort_values("load_hours", ascending=False)
+                st.download_button("📥 Download Machine Loads CSV",
+                                   data=ml_csv.to_csv(index=False),
+                                   file_name="joint_machine_loads.csv", mime="text/csv")
+
+                                   
+# ===========================================================================
+# PAGE 4 – Filter Data
 # ===========================================================================
 
 elif page == "📋 Filter Data":
@@ -2292,7 +2921,7 @@ elif page == "📋 Filter Data":
     <b style='color:#4facfe'>Filter schedule and production data</b><br>
     <span style='color:#ccc'>
     Use the filters below to narrow down by <b>Machine(s)</b>, <b>Product(s)</b>, <b>Date range</b>,
-    <b>Batch size</b>, <b>Duration</b>, <b>Process step</b>, and <b>DCC type</b> (from Product model).
+    <b>Batch size</b>, <b>Duration</b>, <b>Process step</b>, and <b>DCC type</b>.
     </span></div>
     """, unsafe_allow_html=True)
 
@@ -2301,8 +2930,8 @@ elif page == "📋 Filter Data":
         st.warning("Could not load filter options. Ensure the backend is running and data is initialized.")
         st.stop()
 
-    machines = filter_options.get("machines", [])
-    products = filter_options.get("products", [])
+    machines  = filter_options.get("machines", [])
+    products  = filter_options.get("products", [])
     dcc_types = filter_options.get("dcc_types", [])
     date_range = filter_options.get("date_range", {})
 
@@ -2322,31 +2951,14 @@ elif page == "📋 Filter Data":
 
         with c1:
             st.subheader("Schedule & machine")
-            selected_machines = st.multiselect(
-                "Machines",
-                options=machines,
-                default=[],
-                help="Select one or more machines (from Machine model)",
-            )
-            start_date = st.date_input(
-                "Start date (schedule start_time)",
-                value=min_date,
-                min_value=min_date,
-                max_value=max_date,
-                help="Filter operations that start on or after this date",
-            )
-            end_date = st.date_input(
-                "End date (schedule end_time)",
-                value=max_date,
-                min_value=min_date,
-                max_value=max_date,
-                help="Filter operations that end on or before this date",
-            )
+            selected_machines = st.multiselect("Machines", options=machines, default=[])
+            start_date = st.date_input("Start date", value=min_date,
+                                        min_value=min_date, max_value=max_date)
+            end_date = st.date_input("End date", value=max_date,
+                                      min_value=min_date, max_value=max_date)
             step_filter = st.selectbox(
                 "Process step (exact)",
-                options=["— Any —"] + [str(i) for i in range(1, 101)],
-                index=0,
-                help="Filter by ProcessStep.step_number",
+                options=["— Any —"] + [str(i) for i in range(1, 101)], index=0
             )
 
         with c2:
@@ -2356,53 +2968,22 @@ elif page == "📋 Filter Data":
                 for p in products
             ]
             selected_product_label = st.multiselect(
-                "Products (Item : description)",
-                options=product_options,
-                default=[],
-                help="From Product model (item, description, demand_2024, batch_size, num_batches)",
+                "Products (Item : description)", options=product_options, default=[]
             )
             dcc_type_filter = st.selectbox(
-                "DCC type (Product)",
-                options=["— Any —"] + (dcc_types or []),
-                index=0,
-                help="Product.dcc_type",
+                "DCC type", options=["— Any —"] + (dcc_types or []), index=0
             )
-            batch_size_min = st.number_input(
-                "Batch size (min)",
-                min_value=0,
-                value=0,
-                step=10,
-                help="ProductionSchedule.batch_size ≥",
-            )
-            batch_size_max = st.number_input(
-                "Batch size (max)",
-                min_value=0,
-                value=0,
-                step=10,
-                help="0 = no max. ProductionSchedule.batch_size ≤",
-            )
-            duration_min = st.number_input(
-                "Duration hours (min)",
-                min_value=0.0,
-                value=0.0,
-                step=0.5,
-                format="%.2f",
-                help="Operation duration_hours ≥",
-            )
-            duration_max = st.number_input(
-                "Duration hours (max)",
-                min_value=0.0,
-                value=0.0,
-                step=0.5,
-                format="%.2f",
-                help="0 = no max. Operation duration_hours ≤",
-            )
+            batch_size_min = st.number_input("Batch size (min)", min_value=0, value=0, step=10)
+            batch_size_max = st.number_input("Batch size (max)", min_value=0, value=0, step=10,
+                                              help="0 = no max")
+            duration_min = st.number_input("Duration hours (min)", min_value=0.0,
+                                            value=0.0, step=0.5, format="%.2f")
+            duration_max = st.number_input("Duration hours (max)", min_value=0.0,
+                                            value=0.0, step=0.5, format="%.2f",
+                                            help="0 = no max")
 
     if st.button("▶️ Apply filters & load data", type="primary", key="filter_data_apply"):
-        params = {
-            "page": 1,
-            "page_size": 2000,
-        }
+        params = {"page": 1, "page_size": 2000}
         if selected_machines:
             params["machines"] = ",".join(selected_machines)
         if selected_product_label and "All" not in selected_product_label:
@@ -2418,38 +2999,35 @@ elif page == "📋 Filter Data":
         if start_date:
             params["start"] = start_date.isoformat()
         if end_date:
-            # Include full end day (end_time <= 23:59:59)
             params["end"] = f"{end_date.isoformat()}T23:59:59.999999"
         if step_filter and step_filter != "— Any —":
             params["step"] = step_filter
         if dcc_type_filter and dcc_type_filter != "— Any —":
             params["dcc_type"] = dcc_type_filter
-        if batch_size_min and batch_size_min > 0:
+        if batch_size_min > 0:
             params["batch_size_min"] = batch_size_min
-        if batch_size_max and batch_size_max > 0:
+        if batch_size_max > 0:
             params["batch_size_max"] = batch_size_max
-        if duration_min and duration_min > 0:
+        if duration_min > 0:
             params["duration_min"] = duration_min
-        if duration_max and duration_max > 0:
+        if duration_max > 0:
             params["duration_max"] = duration_max
 
         r = requests.get(
             f"{API_BASE_URL}/get-schedule/",
-            params=params,
-            headers=get_auth_headers(),
-            timeout=60,
+            params=params, headers=get_auth_headers(), timeout=60,
         )
         if r.status_code == 200:
             data = r.json()
             st.session_state["filter_data_results"] = data
-            st.session_state["filter_data_params"] = params
+            st.session_state["filter_data_params"]  = params
             st.success(f"✅ Found **{data.get('count', 0):,}** operations.")
         else:
             st.error(f"Error {r.status_code}: {r.text}")
 
     if "filter_data_results" in st.session_state:
-        data = st.session_state["filter_data_results"]
-        results = data.get("results", [])
+        data        = st.session_state["filter_data_results"]
+        results     = data.get("results", [])
         total_count = data.get("count", 0)
 
         st.markdown("---")
@@ -2459,11 +3037,10 @@ elif page == "📋 Filter Data":
             df = pd.DataFrame(results)
             if "start" in df.columns and "end" in df.columns:
                 df["start"] = pd.to_datetime(df["start"], format="ISO8601", utc=True).dt.tz_localize(None).dt.strftime("%Y-%m-%d %H:%M")
-                df["end"] = pd.to_datetime(df["end"], format="ISO8601", utc=True).dt.tz_localize(None).dt.strftime("%Y-%m-%d %H:%M")
+                df["end"]   = pd.to_datetime(df["end"],   format="ISO8601", utc=True).dt.tz_localize(None).dt.strftime("%Y-%m-%d %H:%M")
             if "duration_h" in df.columns:
                 df["duration_h"] = df["duration_h"].round(4)
             st.dataframe(df, use_container_width=True, height=450)
-
             st.download_button(
                 "📥 Download filtered data (CSV)",
                 data=df.to_csv(index=False),
@@ -2474,8 +3051,9 @@ elif page == "📋 Filter Data":
         else:
             st.info("No rows match the current filters.")
 
+
 # ===========================================================================
-# PAGE 3 – Buffer Optimization
+# PAGE 5 – Buffer Optimization
 # ===========================================================================
 
 elif page == "📊 Buffer Optimization":
@@ -2518,7 +3096,6 @@ elif page == "📊 Buffer Optimization":
                         - Budget Available: {pa['total_budget']:.2f} units
                         - Total Required:   {pa['total_required']:.2f} units
                         - Total Allocated:  {pa['total_allocated']:.2f} units
-                        - Optimisation: Minimises utilisation-weighted shortfall
                         """)
 
                     df_buf = pd.DataFrame(data['buffer_recommendations'])
@@ -2557,8 +3134,7 @@ elif page == "📊 Buffer Optimization":
                                                 y=df_buf['allocated_buffer'],
                                                 marker_color='lightgreen'))
                         fig_a.update_layout(barmode='group', height=400,
-                                             title='Required vs Allocated Buffer',
-                                             xaxis_title='Machine', yaxis_title='Buffer Units')
+                                             title='Required vs Allocated Buffer')
                         st.plotly_chart(fig_a, use_container_width=True)
 
                     st.subheader("📋 Detailed Buffer Recommendations")
@@ -2579,7 +3155,7 @@ elif page == "📊 Buffer Optimization":
 
 
 # ===========================================================================
-# PAGE 4 – Bottleneck Analysis
+# PAGE 6 – Bottleneck Analysis
 # ===========================================================================
 
 elif page == "🔍 Bottleneck Analysis":
