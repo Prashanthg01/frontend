@@ -492,7 +492,7 @@ def _render_task_progress(task_id: str, api_url: str):
 
 
 # ===========================================================================
-# NAVIGATION  ← NEW: "📦 Batch Optimization" added
+# NAVIGATION
 # ===========================================================================
 
 st.sidebar.title("🏭 Production Suite")
@@ -501,7 +501,7 @@ page = st.sidebar.radio(
     [
         "📊 Production Analytics",
         "📅 Schedule Management",
-        "📦 Batch Optimization",      # ← NEW
+        "📦 Batch Optimization",
         "📋 Filter Data",
         "📊 Buffer Optimization",
         "🔍 Bottleneck Analysis",
@@ -893,97 +893,287 @@ elif page == "📅 Schedule Management":
                 machines to minimise makespan. Runs async via Celery.
         </span></div>""", unsafe_allow_html=True)
 
-        st.markdown("### 📥 Initialize Data from CSV")
-        st.caption("Upload Frontpage and Process CSV files to refresh products, machines, and routing data.")
-        init_c1, init_c2 = st.columns(2)
-        with init_c1:
-            frontpage_file = st.file_uploader(
-                "Frontpage CSV",
-                type=["csv"],
-                key="schedule_frontpage_csv",
-            )
-        with init_c2:
-            process_file = st.file_uploader(
-                "Process CSV",
-                type=["csv"],
-                key="schedule_process_csv",
-            )
+        # ── Data source toggle ────────────────────────────────────────────────
+        st.markdown("### 📥 Initialize Data")
 
-        init_async_mode = st.checkbox(
-            "Run initialization in background",
-            value=True,
-            key="schedule_init_async_mode",
-        )
-        init_clicked = st.button(
-            "Initialize Data",
-            use_container_width=True,
-            key="schedule_initialize_data_btn",
+        data_source = st.radio(
+            "Select data source",
+            ["📂 Real CSV files", "🧪 Synthetic Dataset"],
+            horizontal=True,
+            key="schedule_data_source_radio",
+            help=(
+                "Real CSV — upload your Frontpage.csv and Process.csv as usual.\n\n"
+                "Synthetic — generate realistic test data automatically (no files needed). "
+                "All results are reproducible via the seed parameter."
+            ),
         )
 
-        if init_clicked:
-            if not frontpage_file or not process_file:
-                st.warning("Please upload both Frontpage CSV and Process CSV files.")
-            else:
-                with st.spinner("Uploading files and initializing data..."):
-                    try:
-                        frontpage_file.seek(0)
-                        process_file.seek(0)
-                        r = requests.post(
-                            f"{API_BASE_URL}/initialize-data/",
-                            files={
-                                "frontpage": (frontpage_file.name, frontpage_file, "text/csv"),
-                                "process": (process_file.name, process_file, "text/csv"),
-                            },
-                            data={"async_mode": str(init_async_mode).lower()},
-                            headers=get_auth_headers(),
-                            timeout=120,
-                        )
-                        if r.status_code == 401:
-                            st.session_state.auth_token = None
-                            st.session_state.username = None
-                            st.error("Session expired. Please log in again.")
-                            st.rerun()
+        # =====================================================================
+        # BRANCH A — Real CSV (original UI, completely unchanged)
+        # =====================================================================
 
-                        if r.status_code in (200, 201, 202):
-                            payload = r.json()
-                            if r.status_code == 202 and payload.get("task_id"):
-                                st.session_state.init_data_task_id = payload["task_id"]
-                                st.session_state.init_data_task_done = False
-                                st.session_state.init_data_result = None
-                                st.success(f"Initialization started. Task ID: `{payload['task_id']}`")
+        if data_source == "📂 Real CSV files":
+
+            st.caption("Upload Frontpage and Process CSV files to refresh products, machines, and routing data.")
+
+            init_c1, init_c2 = st.columns(2)
+            with init_c1:
+                frontpage_file = st.file_uploader(
+                    "Frontpage CSV",
+                    type=["csv"],
+                    key="schedule_frontpage_csv",
+                )
+            with init_c2:
+                process_file = st.file_uploader(
+                    "Process CSV",
+                    type=["csv"],
+                    key="schedule_process_csv",
+                )
+
+            init_async_mode = st.checkbox(
+                "Run initialization in background",
+                value=True,
+                key="schedule_init_async_mode",
+            )
+            init_clicked = st.button(
+                "Initialize Data",
+                use_container_width=True,
+                key="schedule_initialize_data_btn",
+            )
+
+            if init_clicked:
+                if not frontpage_file or not process_file:
+                    st.warning("Please upload both Frontpage CSV and Process CSV files.")
+                else:
+                    with st.spinner("Uploading files and initializing data..."):
+                        try:
+                            frontpage_file.seek(0)
+                            process_file.seek(0)
+                            r = requests.post(
+                                f"{API_BASE_URL}/initialize-data/",
+                                files={
+                                    "frontpage": (frontpage_file.name, frontpage_file, "text/csv"),
+                                    "process":   (process_file.name,  process_file,  "text/csv"),
+                                },
+                                data={"async_mode": str(init_async_mode).lower()},
+                                headers=get_auth_headers(),
+                                timeout=120,
+                            )
+                            if r.status_code == 401:
+                                st.session_state.auth_token = None
+                                st.session_state.username   = None
+                                st.error("Session expired. Please log in again.")
+                                st.rerun()
+
+                            if r.status_code in (200, 201, 202):
+                                payload = r.json()
+                                if r.status_code == 202 and payload.get("task_id"):
+                                    st.session_state.init_data_task_id   = payload["task_id"]
+                                    st.session_state.init_data_task_done = False
+                                    st.session_state.init_data_result    = None
+                                    st.success(f"Initialization started. Task ID: `{payload['task_id']}`")
+                                else:
+                                    st.session_state.init_data_task_id   = None
+                                    st.session_state.init_data_task_done = True
+                                    st.session_state.init_data_result    = payload
+                                    st.success(payload.get("message", "Database initialized successfully."))
                             else:
-                                st.session_state.init_data_task_id = None
-                                st.session_state.init_data_task_done = True
-                                st.session_state.init_data_result = payload
-                                st.success(payload.get("message", "Database initialized successfully."))
-                        else:
-                            st.error(f"Error {r.status_code}: {r.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
+                                st.error(f"Error {r.status_code}: {r.text}")
+                        except Exception as e:
+                            st.error(f"Connection error: {e}")
+
+        # =====================================================================
+        # BRANCH B — Synthetic dataset
+        # =====================================================================
+
+        else:  # "🧪 Synthetic Dataset"
+
+            st.markdown("""
+            <div style='background:#0d200d;border-left:3px solid #38ef7d;
+                        padding:8px 14px;border-radius:4px;font-size:12px;
+                        color:#86efac;margin-bottom:14px;'>
+            🧪 <b>Synthetic Mode</b> — generates a realistic in-memory dataset and loads it
+            directly into the database. No file upload needed.
+            All algorithms (scheduler, batch ILP, buffer LP, gap analysis) work identically
+            on synthetic and real data because both produce the same DB schema.
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ── Parameter controls ────────────────────────────────────────────
+
+            syn_c1, syn_c2, syn_c3 = st.columns(3)
+
+            with syn_c1:
+                syn_num_products = st.number_input(
+                    "Number of products",
+                    min_value=1, max_value=200, value=10,
+                    help="How many synthetic products to generate (1–200)",
+                    key="syn_num_products",
+                )
+                syn_seed = st.number_input(
+                    "Random seed",
+                    min_value=0, max_value=999_999, value=42,
+                    help="Fix the seed for reproducible results. Same seed → identical dataset.",
+                    key="syn_seed",
+                )
+
+            with syn_c2:
+                syn_num_machines = st.number_input(
+                    "Number of machines",
+                    min_value=2, max_value=15, value=2,
+                    help="Machines to include in the synthetic dataset (2–15).",
+                    key="syn_num_machines",
+                )
+                syn_demand_min = st.number_input(
+                    "Min annual demand",
+                    min_value=1, max_value=1_000_000, value=500,
+                    key="syn_demand_min",
+                )
+
+            with syn_c3:
+                syn_steps = st.number_input(
+                    "Steps per product",
+                    min_value=0, max_value=15, value=0,
+                    help="Routing depth per product (0 = random 3-8)",
+                    key="syn_steps_per_product",
+                )
+                syn_demand_max = st.number_input(
+                    "Max annual demand",
+                    min_value=1, max_value=10_000_000, value=50_000,
+                    key="syn_demand_max",
+                )
+
+            syn_async = st.checkbox(
+                "Run initialization in background (Celery)",
+                value=True,
+                key="syn_async_mode",
+            )
+            syn_clear = st.checkbox(
+                "Clear existing data before loading",
+                value=True,
+                key="syn_clear_existing",
+            )
+
+            # ── Reproducibility notice ────────────────────────────────────────
+
+            st.markdown(
+                f"<div style='background:#111;border:1px solid #222;border-radius:4px;"
+                f"padding:6px 12px;font-size:11px;color:#9ca3af;margin:4px 0 8px 0;'>"
+                f"🔑 <b>Reproducibility key:</b> "
+                f"seed=<b>{syn_seed}</b>, products=<b>{syn_num_products}</b>, "
+                f"machines=<b>{'auto' if syn_num_machines == 0 else syn_num_machines}</b>, "
+                f"steps=<b>{'random 3-8' if syn_steps == 0 else syn_steps}</b>, "
+                f"demand=[<b>{syn_demand_min:,}</b>–<b>{syn_demand_max:,}</b>]"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            syn_init_clicked = st.button(
+                "🧪 Generate & Load Synthetic Dataset",
+                type="primary",
+                use_container_width=True,
+                key="syn_initialize_btn",
+            )
+
+            if syn_init_clicked:
+                if syn_demand_min >= syn_demand_max:
+                    st.error("Min demand must be less than Max demand.")
+                else:
+                    payload = {
+                        "num_products":   int(syn_num_products),
+                        "seed":           int(syn_seed),
+                        "demand_min":     int(syn_demand_min),
+                        "demand_max":     int(syn_demand_max),
+                        "clear_existing": str(syn_clear).lower(),
+                        "async_mode":     str(syn_async).lower(),
+                    }
+                    if syn_num_machines > 0:
+                        payload["num_machines"] = int(syn_num_machines)
+                    if syn_steps > 0:
+                        payload["steps_per_product"] = int(syn_steps)
+
+                    with st.spinner("Generating synthetic dataset…"):
+                        try:
+                            r = requests.post(
+                                f"{API_BASE_URL}/initialize-synthetic/",
+                                json=payload,
+                                headers=get_auth_headers(),
+                                timeout=120,
+                            )
+                            if r.status_code == 401:
+                                st.session_state.auth_token = None
+                                st.session_state.username   = None
+                                st.error("Session expired. Please log in again.")
+                                st.rerun()
+
+                            if r.status_code in (200, 201, 202):
+                                resp = r.json()
+
+                                if r.status_code == 202 and resp.get("task_id"):
+                                    # Async: hand off to the existing progress poller
+                                    st.session_state.init_data_task_id   = resp["task_id"]
+                                    st.session_state.init_data_task_done = False
+                                    st.session_state.init_data_result    = None
+                                    meta = resp.get("metadata", {})
+                                    st.success(
+                                        f"Synthetic generation started — "
+                                        f"Task ID: `{resp['task_id']}`"
+                                    )
+                                    if meta:
+                                        st.json(meta)
+                                else:
+                                    # Sync result
+                                    st.session_state.init_data_task_id   = None
+                                    st.session_state.init_data_task_done = True
+                                    st.session_state.init_data_result    = resp
+                                    st.success(resp.get("message", "Synthetic data loaded."))
+                            else:
+                                st.error(f"Error {r.status_code}: {r.text}")
+
+                        except Exception as e:
+                            st.error(f"Connection error: {e}")
+
+        # ── Shared progress poller (works for both real and synthetic async tasks) ──
 
         init_task_id = st.session_state.get("init_data_task_id")
         if init_task_id and not st.session_state.get("init_data_task_done", True):
             st.markdown("#### ⏳ Data Initialization Progress")
-            init_pb = st.progress(0)
+            init_pb  = st.progress(0)
             init_txt = st.empty()
             init_result = poll_task_until_complete(
-                init_task_id,
-                init_pb,
-                init_txt,
-                max_wait_seconds=600,
+                init_task_id, init_pb, init_txt, max_wait_seconds=600,
             )
             if init_result:
-                st.session_state.init_data_result = init_result
+                st.session_state.init_data_result    = init_result
                 st.session_state.init_data_task_done = True
+
+        # ── Display result metrics (same for real and synthetic) ──────────────
 
         init_result = st.session_state.get("init_data_result")
         if isinstance(init_result, dict):
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Products", init_result.get("products_created", "—"))
-            m2.metric("Machines", init_result.get("machines_created", "—"))
+            badge_color = "#38ef7d" if init_result.get("dataset_type") == "synthetic" else "#4facfe"
+            badge_label = "🧪 Synthetic" if init_result.get("dataset_type") == "synthetic" else "📂 Real CSV"
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Products",      init_result.get("products_created", "—"))
+            m2.metric("Machines",      init_result.get("machines_created", "—"))
             m3.metric("Process Steps", init_result.get("process_steps_created", "—"))
+            m4.markdown(
+                f"<div style='padding:10px 0;'>"
+                f"<span style='background:{badge_color};color:#000;padding:4px 10px;"
+                f"border-radius:10px;font-size:11px;font-weight:700;'>{badge_label}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
             if init_result.get("message"):
                 st.success(init_result["message"])
+
+            # Show reproducibility metadata for synthetic runs
+            meta = init_result.get("metadata", {})
+            if meta and meta.get("dataset_type") == "synthetic":
+                with st.expander("🔬 Dataset Metadata (reproducibility record)", expanded=False):
+                    st.json(meta)
 
         st.markdown("---")
 
@@ -2070,7 +2260,7 @@ processing time globally, creating "arrival gaps".
 
 
 # ===========================================================================
-# PAGE 3 – Batch Optimization  ← NEW PAGE
+# PAGE 3 – Batch Optimization
 # ===========================================================================
 
 elif page == "📦 Batch Optimization":
@@ -2909,7 +3099,7 @@ where  load_{i,m,n}  =  cycle_time_{i,m} × ceil(demand_i/n) × n  /  3600
                                    data=ml_csv.to_csv(index=False),
                                    file_name="joint_machine_loads.csv", mime="text/csv")
 
-                                   
+
 # ===========================================================================
 # PAGE 4 – Filter Data
 # ===========================================================================
