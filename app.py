@@ -359,6 +359,12 @@ def _compute_gaps_from_bars(bars: list) -> dict:
 
 
 def build_gantt_figure(gantt_data: dict, height: int = 600) -> go.Figure:
+    """
+    Build a Gantt chart using Plotly shapes + scatter (notebook approach).
+
+    Uses add_shape for bar rectangles and invisible scatter traces for hover,
+    giving precise visual control and proper datetime axis rendering.
+    """
     bars     = gantt_data.get('gantt_bars', [])
     machines = gantt_data.get('machines', [])
 
@@ -368,67 +374,149 @@ def build_gantt_figure(gantt_data: dict, height: int = 600) -> go.Figure:
                           template='plotly_dark', height=height)
         return fig
 
-    fig           = go.Figure()
-    seen_products = set()
-    _epoch        = datetime(1970, 1, 1)
+    # Parse datetimes once
+    for b in bars:
+        b['_s'] = _parse_iso(b['start'])
+        b['_e'] = _parse_iso(b['end'])
+
+    # Machine ordering: API provides them sorted by descending load
+    if not machines:
+        machines = list(dict.fromkeys(b['machine'] for b in bars))
+    machine_y = {m: i for i, m in enumerate(machines)}
+
+    # Product color palette
+    products_sorted = sorted(set(b['product'] for b in bars))
+    palette = [
+        "#AED6F1", "#A9DFBF", "#F9E79F", "#F5CBA7", "#D2B4DE",
+        "#ABEBC6", "#FAD7A0", "#A8D8EA", "#F1948A", "#85C1E9",
+        "#82E0AA", "#F8C471", "#BB8FCE", "#76D7C4", "#F0B27A",
+        "#73C6B6", "#C39BD3", "#A9CCE3", "#FADBD8", "#D5DBDB",
+    ]
+    color_map = {p: palette[i % len(palette)] for i, p in enumerate(products_sorted)}
+
+    fig = go.Figure()
 
     for bar in bars:
-        product  = bar['product']
-        color    = _product_color(bar['color_key'])
-        start_dt = _parse_iso(bar['start'])
-        end_dt   = _parse_iso(bar['end'])
-        dur_h    = bar['duration_h']
+        y      = machine_y.get(bar['machine'], 0)
+        color  = color_map.get(bar['product'], palette[0])
+        s_dt   = bar['_s']
+        e_dt   = bar['_e']
+        dur_h  = bar['duration_h']
+        lx     = s_dt + (e_dt - s_dt) / 2
 
-        show_legend = product not in seen_products
-        seen_products.add(product)
-
-        hover = (
-            f"<b>Product:</b> {product}<br>"
-            f"<b>Machine:</b> {bar['machine']}<br>"
-            f"<b>Batch:</b> {bar['batch_id']} (#{bar['batch_num']})<br>"
-            f"<b>Step:</b> {bar['step']} – {bar['step_name']}<br>"
-            f"<b>Start:</b> {start_dt.strftime('%Y-%m-%d %H:%M')}<br>"
-            f"<b>End:</b>   {end_dt.strftime('%Y-%m-%d %H:%M')}<br>"
-            f"<b>Duration:</b> {dur_h:.2f} h"
+        # Bar rectangle using shape for precise positioning
+        fig.add_shape(
+            type="rect",
+            x0=s_dt, x1=e_dt,
+            y0=y - 0.40, y1=y + 0.40,
+            fillcolor=color,
+            line=dict(color="rgba(80,80,80,0.35)", width=1),
+            layer="below",
         )
 
-        fig.add_trace(go.Bar(
-            name          = str(product),
-            x             = [dur_h],
-            y             = [bar['machine']],
-            orientation   = 'h',
-            base          = [(start_dt - _epoch).total_seconds() / 3600],
-            marker_color  = color,
-            opacity       = 0.85,
-            hovertemplate = hover + "<extra></extra>",
-            showlegend    = show_legend,
-            legendgroup   = str(product),
+        # Step number label (show when bar is wide enough)
+        if dur_h >= 0.4:
+            fig.add_annotation(
+                x=lx, y=y + 0.10,
+                text=f"<b>S{bar['step']}</b>",
+                showarrow=False,
+                font=dict(size=9, color="#1a252f"),
+                align="center", xanchor="center",
+            )
+        if dur_h >= 2.0:
+            step_nm = (bar.get('step_name', '') or '')[:22]
+            fig.add_annotation(
+                x=lx, y=y - 0.18,
+                text=step_nm,
+                showarrow=False,
+                font=dict(size=7, color="#2c3e50"),
+                align="center", xanchor="center",
+            )
+
+        # Invisible scatter point for rich hover tooltip
+        hover = (
+            f"<b>Step {bar['step']}: {bar.get('step_name', '')}</b><br>"
+            f"Product: {bar['product']}<br>"
+            f"Batch: {bar['batch_id']} (#{bar['batch_num']})<br>"
+            f"Machine: {bar['machine']}<br>"
+            f"Start: {s_dt.strftime('%d %b %H:%M')}<br>"
+            f"End: {e_dt.strftime('%d %b %H:%M')}<br>"
+            f"Duration: {dur_h:.2f} h"
+        )
+        fig.add_trace(go.Scatter(
+            x=[lx], y=[y],
+            mode="markers",
+            marker=dict(size=1, opacity=0),
+            hovertemplate=hover + "<extra></extra>",
+            showlegend=False,
         ))
 
-    dr      = gantt_data.get('date_range', {})
-    x_start = _parse_iso(dr['start']) if dr.get('start') else None
-    x_end   = _parse_iso(dr['end'])   if dr.get('end')   else None
-    x0_hrs  = (x_start - _epoch).total_seconds() / 3600 if x_start else 0
-    x1_hrs  = (x_end   - _epoch).total_seconds() / 3600 if x_end   else x0_hrs + 24
+    # Legend entries — one per product
+    shown: set = set()
+    for bar in bars:
+        p = bar['product']
+        if p in shown:
+            continue
+        shown.add(p)
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(size=14, color=color_map[p], symbol="square",
+                        line=dict(color="rgba(120,120,120,0.4)", width=1)),
+            name=f"Product {p}",
+            showlegend=True,
+        ))
 
-    span_days = (x1_hrs - x0_hrs) / 24
-    tick_step = 24 if span_days <= 7 else (7 * 24 if span_days <= 30 else 14 * 24)
-    tick_vals = list(range(int(x0_hrs), int(x1_hrs) + 1, tick_step))
-    tick_text = [
-        (_epoch + pd.Timedelta(hours=h)).strftime('%b %d') for h in tick_vals
-    ]
+    # Axis ranges
+    all_starts = [b['_s'] for b in bars]
+    all_ends   = [b['_e'] for b in bars]
+    x_min = min(all_starts) - timedelta(minutes=20)
+    x_max = max(all_ends)   + timedelta(minutes=20)
+    span_h = (max(all_ends) - min(all_starts)).total_seconds() / 3600
+
+    tick_fmt = "%d %b %H:%M" if span_h <= 72 else ("%d %b" if span_h <= 720 else "%b %Y")
 
     fig.update_layout(
-        template  = 'plotly_dark',
-        height    = max(height, 60 * len(machines) + 150),
-        barmode   = 'overlay',
-        title     = "Production Schedule – Gantt Chart",
-        xaxis     = dict(title='Date', tickvals=tick_vals, ticktext=tick_text,
-                         range=[x0_hrs, x1_hrs], showgrid=True, gridcolor='#444'),
-        yaxis     = dict(title='Machine', autorange='reversed',
-                         showgrid=True, gridcolor='#333'),
-        legend    = dict(title='Product', orientation='v', x=1.01, y=1),
-        margin    = dict(l=160, r=160, t=60, b=60),
+        template     = 'plotly_dark',
+        height       = max(height, 72 * len(machines) + 160),
+        title        = dict(text="<b>Production Schedule — Gantt Chart</b>",
+                            font=dict(size=14, color="#e0e0e0"), x=0),
+        xaxis=dict(
+            title      = "",
+            type       = "date",
+            tickformat = tick_fmt,
+            showgrid   = True,
+            gridcolor  = "rgba(255,255,255,0.08)",
+            range      = [x_min, x_max],
+            zeroline   = False,
+            tickfont   = dict(size=10, color="#aaaaaa"),
+            showline   = True,
+            linecolor  = "rgba(200,200,200,0.3)",
+        ),
+        yaxis=dict(
+            title    = "",
+            tickvals = list(range(len(machines))),
+            ticktext = [f"<b>{m}</b>" for m in machines],
+            showgrid = True,
+            gridcolor= "rgba(255,255,255,0.05)",
+            zeroline = False,
+            tickfont = dict(size=10, color="#cccccc"),
+            range    = [-0.65, len(machines) - 0.35],
+            autorange= "reversed",
+        ),
+        plot_bgcolor  = "#1a1a2e",
+        paper_bgcolor = "#0e1117",
+        legend=dict(
+            title=dict(text="Product", font=dict(size=11, color="#cccccc")),
+            orientation="v",
+            x=1.01, y=1,
+            bgcolor="rgba(20,20,30,0.85)",
+            bordercolor="rgba(255,255,255,0.12)",
+            borderwidth=1,
+            font=dict(size=10, color="#cccccc"),
+            itemsizing="constant",
+        ),
+        margin      = dict(l=200, r=190, t=70, b=50),
+        hovermode   = "closest",
     )
     return fig
 
@@ -1177,48 +1265,98 @@ elif page == "📅 Schedule Management":
 
         st.markdown("---")
 
+        # ── Schedule Type selection ────────────────────────────────────────────
+        st.markdown("#### Schedule Generation Type")
+        stype_col1, stype_col2 = st.columns([1, 2])
+        with stype_col1:
+            schedule_type = st.radio(
+                "Scheduler",
+                options=[1, 2],
+                format_func=lambda x: (
+                    "Type 1 — Shift-Aware" if x == 1 else "Type 2 — ERT + PuLP (Optimised)"
+                ),
+                index=1,
+                help=(
+                    "Type 1: Simple shift-aware scheduler. Respects shift windows "
+                    "(6-14, 14-22, 22-06). Guarantees no operation straddles a shift boundary.\n\n"
+                    "Type 2: ERT greedy dispatch + left-shift compaction + PuLP MILP on "
+                    "bottleneck machines. Higher throughput, no hard shift boundaries."
+                ),
+            )
+        with stype_col2:
+            if schedule_type == 1:
+                st.markdown(
+                    "<div style='background:#0d2033;border-left:3px solid #4facfe;"
+                    "padding:10px 14px;border-radius:4px;font-size:12px;color:#93c5fd;margin-top:8px;'>"
+                    "<b>Type 1 — Shift-Aware Scheduler</b><br>"
+                    "Operations are snapped into shift windows (Morning 06-14, Afternoon 14-22, Night 22-06). "
+                    "Guarantees: no machine overlap, step sequencing, shift boundary compliance, "
+                    "duration consistency, batch coherence. Fast and predictable."
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    "<div style='background:#0d2a0d;border-left:3px solid #22c55e;"
+                    "padding:10px 14px;border-radius:4px;font-size:12px;color:#86efac;margin-top:8px;'>"
+                    "<b>Type 2 — ERT + PuLP Optimised Scheduler</b><br>"
+                    "Phase 1a: Greedy ERT dispatch with round-robin interleaving. "
+                    "Phase 1b: Left-shift compaction (gap elimination). "
+                    "Phase 2: PuLP MILP re-sequencing on bottleneck machines. "
+                    "Maximises throughput; no hard shift boundaries."
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown("---")
+
         g1, g2, g3, g4 = st.columns(4)
         with g1:
             start_date = st.date_input("📅 Schedule Start Date", value=date.today(),
                                         help="All operations are anchored from this date.")
         with g2:
-            local_opt = st.slider("🔧 Bottleneck Machines to Re-optimise",
-                                   min_value=0, max_value=15, value=5,
-                                   help="Higher = better quality, slower solve.")
+            local_opt = st.slider(
+                "🔧 Bottleneck Machines (Type 2 only)",
+                min_value=0, max_value=15, value=5,
+                help="Re-optimise top N loaded machines with PuLP MILP. Only used in Type 2.",
+                disabled=(schedule_type == 1),
+            )
         with g3:
             clear_existing = st.checkbox("🗑️ Clear existing schedule before saving",
                                           value=True)
         with g4:
             enable_compaction = st.checkbox(
-                "🔀 Enable Gap Elimination",
+                "🔀 Enable Gap Elimination (Type 2 only)",
                 value=True,
                 help=(
                     "Runs Left-Shift Compaction after greedy dispatch. "
                     "Slides every operation as early as possible (respecting "
                     "precedence + no overlap) to eliminate idle gaps. "
-                    "Recommended: ✅ ON"
-                )
+                    "Only applies to Type 2."
+                ),
+                disabled=(schedule_type == 1),
             )
 
-        if enable_compaction:
-            st.markdown(
-                "<div style='background:#0d2a0d;border-left:3px solid #22c55e;"
-                "padding:8px 14px;border-radius:4px;font-size:12px;color:#86efac;'>"
-                "✅ <b>Gap Elimination ON</b> — Left-Shift Compaction will run after "
-                "greedy dispatch, sliding every operation left to fill idle gaps "
-                "without breaking precedence constraints."
-                "</div>",
-                unsafe_allow_html=True
-            )
-        else:
-            st.markdown(
-                "<div style='background:#2a1a0d;border-left:3px solid #f59e0b;"
-                "padding:8px 14px;border-radius:4px;font-size:12px;color:#fcd34d;'>"
-                "⚠️ <b>Gap Elimination OFF</b> — Greedy-only schedule will have idle "
-                "gaps. Enable this for continuous machine utilisation."
-                "</div>",
-                unsafe_allow_html=True
-            )
+        if schedule_type == 2:
+            if enable_compaction:
+                st.markdown(
+                    "<div style='background:#0d2a0d;border-left:3px solid #22c55e;"
+                    "padding:8px 14px;border-radius:4px;font-size:12px;color:#86efac;'>"
+                    "✅ <b>Gap Elimination ON</b> — Left-Shift Compaction will run after "
+                    "greedy dispatch, sliding every operation left to fill idle gaps "
+                    "without breaking precedence constraints."
+                    "</div>",
+                    unsafe_allow_html=True
+                )
+            else:
+                st.markdown(
+                    "<div style='background:#2a1a0d;border-left:3px solid #f59e0b;"
+                    "padding:8px 14px;border-radius:4px;font-size:12px;color:#fcd34d;'>"
+                    "⚠️ <b>Gap Elimination OFF</b> — Greedy-only schedule will have idle "
+                    "gaps. Enable this for continuous machine utilisation."
+                    "</div>",
+                    unsafe_allow_html=True
+                )
 
         st.markdown("---")
 
@@ -1270,6 +1408,7 @@ elif page == "📅 Schedule Management":
         if gen_clicked:
             payload = {
                 'start_date':         start_date.isoformat(),
+                'schedule_type':      schedule_type,
                 'local_opt_machines': local_opt,
                 'clear_existing':     clear_existing,
                 'enable_compaction':  enable_compaction,
@@ -1303,14 +1442,16 @@ elif page == "📅 Schedule Management":
     with tab_gantt:
         st.subheader("📊 Gantt Chart")
 
+        # ── Row 1: fetch-time filters (sent to API) ───────────────────────
         gc1, gc2, gc3 = st.columns([2, 1, 1])
         with gc1:
             try:
                 mr = requests.get(f"{API_BASE_URL}/get-filter-options/", headers=get_auth_headers(), timeout=10)
-                all_machines = mr.json().get('machines', []) if mr.ok else []
+                _fo = mr.json() if mr.ok else {}
+                all_machines = _fo.get('machines', [])
             except Exception:
                 all_machines = []
-            sel_machines = st.multiselect("Filter Machines", options=all_machines,
+            sel_machines = st.multiselect("🏭 Filter Machines", options=all_machines,
                                            default=[], placeholder="All machines")
         with gc2:
             max_bars = st.number_input("Max bars to render",
@@ -1318,6 +1459,43 @@ elif page == "📅 Schedule Management":
         with gc3:
             chart_h = st.number_input("Chart height (px)",
                                        min_value=400, max_value=2000, value=700, step=50)
+
+        # ── Row 2: client-side filters (applied after load) ───────────────
+        gd_raw = st.session_state.get('gantt_data')
+        if gd_raw and gd_raw.get('gantt_bars'):
+            _raw_bars = gd_raw['gantt_bars']
+            _prod_opts = sorted(set(b['product'] for b in _raw_bars))
+            _prod_labels = {p: f"Product {p}" for p in _prod_opts}
+        else:
+            _prod_opts, _prod_labels = [], {}
+
+        gc4, gc5 = st.columns([1, 1])
+        with gc4:
+            sel_products = st.multiselect(
+                "📦 Filter Products",
+                options=_prod_opts,
+                format_func=lambda p: _prod_labels.get(p, str(p)),
+                default=[],
+                placeholder="All products",
+                key="gantt_sel_products",
+            )
+        with gc5:
+            # Batch options depend on selected products
+            if _prod_opts:
+                _batch_pool = [
+                    b['batch_id'] for b in (_raw_bars if gd_raw and gd_raw.get('gantt_bars') else [])
+                    if (not sel_products or b['product'] in sel_products)
+                ]
+                _batch_opts = sorted(set(_batch_pool))
+            else:
+                _batch_opts = []
+            sel_batches = st.multiselect(
+                "🗂️ Filter Batches",
+                options=_batch_opts,
+                default=[],
+                placeholder="All batches",
+                key="gantt_sel_batches",
+            )
 
         if st.button("🔄 Load / Refresh Gantt", type="primary"):
             params = {'max_bars': max_bars}
@@ -1329,6 +1507,7 @@ elif page == "📅 Schedule Management":
                                      params=params, headers=get_auth_headers(), timeout=30)
                     if r.ok:
                         st.session_state.gantt_data = r.json()
+                        st.rerun()
                     else:
                         st.error(f"Error {r.status_code}: {r.text}")
                 except Exception as e:
@@ -1337,34 +1516,59 @@ elif page == "📅 Schedule Management":
         gd = st.session_state.get('gantt_data')
         if gd:
             total = gd.get('total_bars', 0)
-            shown = len(gd.get('gantt_bars', []))
+            all_bars = gd.get('gantt_bars', [])
+
+            # Apply client-side product / batch filters
+            filtered_bars = [
+                b for b in all_bars
+                if (not sel_products or b['product'] in sel_products)
+                and (not sel_batches  or b['batch_id'] in sel_batches)
+            ]
+
+            shown_total = len(all_bars)
+            shown_filtered = len(filtered_bars)
+
             if gd.get('truncated'):
-                st.warning(f"⚠️ Showing {shown:,} of {total:,} operations. "
+                st.warning(f"⚠️ Showing {shown_total:,} of {total:,} operations (server truncated). "
                            "Filter by machine to see more detail.")
+            if (sel_products or sel_batches) and shown_filtered < shown_total:
+                st.info(f"🔍 Filters active — showing **{shown_filtered:,}** of {shown_total:,} loaded operations.")
 
-            dr = gd.get('date_range', {})
-            if dr.get('start') and dr.get('end'):
-                d0 = _parse_iso(dr['start'])
-                d1 = _parse_iso(dr['end'])
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Makespan", f"{(d1-d0).total_seconds()/3600:.1f} h")
-                m2.metric("Machines", len(gd.get('machines', [])))
-                m3.metric("Operations shown", f"{shown:,}")
+            # Build a filtered copy of the gantt_data for the figure
+            filtered_machines = list(dict.fromkeys(
+                m for m in gd.get('machines', [])
+                if any(b['machine'] == m for b in filtered_bars)
+            ))
+            gd_filtered = {
+                **gd,
+                'gantt_bars': filtered_bars,
+                'machines':   filtered_machines,
+            }
 
-            st.plotly_chart(build_gantt_figure(gd, height=chart_h),
-                            use_container_width=True)
+            if filtered_bars:
+                dr = gd.get('date_range', {})
+                fa, fb, fc, fd = st.columns(4)
+                fa.metric("Operations shown", f"{shown_filtered:,}")
+                fb.metric("Machines", len(filtered_machines))
+                fc.metric("Products", len(set(b['product'] for b in filtered_bars)))
+                fd.metric("Batches", len(set(b['batch_id'] for b in filtered_bars)))
 
-            st.markdown("#### 🏭 Machine Load Summary")
-            bars_df = pd.DataFrame(gd['gantt_bars'])
-            if not bars_df.empty:
-                load_df = (bars_df.groupby('machine')['duration_h'].sum()
-                           .reindex(gd.get('machines', [])).reset_index()
-                           .rename(columns={'duration_h': 'Total Load (h)'}))
-                lf = px.bar(load_df, x='machine', y='Total Load (h)',
-                             color='Total Load (h)', color_continuous_scale='Blues',
-                             title="Total Machine Load (hours)", template='plotly_dark')
-                lf.update_layout(height=350, showlegend=False)
-                st.plotly_chart(lf, use_container_width=True)
+                st.plotly_chart(build_gantt_figure(gd_filtered, height=chart_h),
+                                use_container_width=True)
+
+                st.markdown("#### 🏭 Machine Load Summary")
+                bars_df = pd.DataFrame(filtered_bars)
+                if not bars_df.empty:
+                    load_df = (bars_df.groupby('machine')['duration_h'].sum()
+                               .reindex(filtered_machines).dropna().reset_index()
+                               .rename(columns={'duration_h': 'Total Load (h)'}))
+                    lf = px.bar(load_df, x='machine', y='Total Load (h)',
+                                 color='Total Load (h)', color_continuous_scale='Blues',
+                                 title="Total Machine Load (hours)", template='plotly_dark')
+                    lf.update_layout(height=350, showlegend=False)
+                    st.plotly_chart(lf, use_container_width=True)
+            else:
+                st.warning("No operations match the selected filters. Try broadening the selection.")
         else:
             st.info("Click **Load / Refresh Gantt** to fetch schedule data.")
 
@@ -1381,7 +1585,7 @@ elif page == "📅 Schedule Management":
             except Exception:
                 tl_machines = []
             sel_tl_machines = st.multiselect(
-                "Select Machine(s)", options=tl_machines,
+                "🏭 Select Machine(s)", options=tl_machines,
                 default=tl_machines[:6] if tl_machines else [],
                 placeholder="Pick machines to display"
             )
@@ -1400,6 +1604,38 @@ elif page == "📅 Schedule Management":
             tl_opt_goal = st.radio("Optimisation Goal",
                                    ["Minimize Makespan", "Maximize Throughput"],
                                    index=0)
+
+        # ── Row 2: client-side product / batch filters ────────────────────
+        _tl_raw = st.session_state.get('timeline_data') or st.session_state.get('gantt_data')
+        if _tl_raw and _tl_raw.get('gantt_bars'):
+            _tl_bars = _tl_raw['gantt_bars']
+            _tl_prod_opts = sorted(set(b['product'] for b in _tl_bars))
+        else:
+            _tl_bars, _tl_prod_opts = [], []
+
+        tl5, tl6 = st.columns([1, 1])
+        with tl5:
+            sel_tl_products = st.multiselect(
+                "📦 Filter Products",
+                options=_tl_prod_opts,
+                format_func=lambda p: f"Product {p}",
+                default=[],
+                placeholder="All products",
+                key="tl_sel_products",
+            )
+        with tl6:
+            _tl_batch_pool = [
+                b['batch_id'] for b in _tl_bars
+                if (not sel_tl_products or b['product'] in sel_tl_products)
+            ]
+            _tl_batch_opts = sorted(set(_tl_batch_pool))
+            sel_tl_batches = st.multiselect(
+                "🗂️ Filter Batches",
+                options=_tl_batch_opts,
+                default=[],
+                placeholder="All batches",
+                key="tl_sel_batches",
+            )
 
         if st.button("🔄 Load Timeline", type="primary"):
             params = {'max_bars': 2000, 'page_size': 2000, 'format': 'gantt'}
@@ -1459,12 +1695,38 @@ elif page == "📅 Schedule Management":
         td = st.session_state.get('timeline_data') or st.session_state.get('gantt_data')
 
         if td and td.get('gantt_bars'):
-            bars_all  = td['gantt_bars']
-            machines  = sel_tl_machines if sel_tl_machines else td.get('machines', [])
-            bars_all = [b for b in bars_all if not sel_tl_machines or b['machine'] in sel_tl_machines]
+            bars_all = list(td['gantt_bars'])
+
+            # Filter by selected machines (after loading)
+            if sel_tl_machines:
+                bars_all = [b for b in bars_all if b['machine'] in sel_tl_machines]
+
+            # Filter by selected products and batches (client-side)
+            if sel_tl_products:
+                bars_all = [b for b in bars_all if b['product'] in sel_tl_products]
+            if sel_tl_batches:
+                bars_all = [b for b in bars_all if b['batch_id'] in sel_tl_batches]
+
+            # Derive machine list from actual data (preserving display order)
+            if sel_tl_machines:
+                machines = [m for m in sel_tl_machines if any(b['machine'] == m for b in bars_all)]
+            else:
+                # Use API-provided order (sorted by load desc) if available
+                api_machines = td.get('machines', [])
+                seen_m: set = set()
+                machines = []
+                for m in api_machines:
+                    if m not in seen_m and any(b['machine'] == m for b in bars_all):
+                        machines.append(m)
+                        seen_m.add(m)
+                # Add any machines in data not in API list
+                for b in bars_all:
+                    if b['machine'] not in seen_m:
+                        machines.append(b['machine'])
+                        seen_m.add(b['machine'])
 
             if not bars_all:
-                st.info("No operations found for selected machines.")
+                st.info("No operations match the selected filters. Try broadening the machine, product, or batch selection.")
             else:
                 all_starts = [_parse_iso(b['start']) for b in bars_all]
                 all_ends   = [_parse_iso(b['end'])   for b in bars_all]
@@ -1491,22 +1753,34 @@ elif page == "📅 Schedule Management":
                         machine_bars[b['machine']].append(b)
 
                 total_ops   = len(bars_all)
-                total_dur   = sum(b['duration_h'] for b in bars_all)
                 kpi_data_tl = st.session_state.get('kpi_data') or {}
                 makespan_h  = kpi_data_tl.get('total_makespan_hours', round(span_hrs, 1))
                 util_rows   = kpi_data_tl.get('machine_utilization', []) or []
                 n_setups    = len(set(b['batch_id'] for b in bars_all))
                 throughput  = kpi_data_tl.get('throughput_units_per_day', 0) or 0
 
-                LABEL_W    = 140
-                ROW_H      = 44
+                LABEL_W    = 160
+                ROW_H      = 46
                 TRACK_PAD  = 4
                 BAR_H      = ROW_H - TRACK_PAD * 2
-                TICK_SPACING_PX = 40
-                n_ticks = int(span_hrs * 60 / time_interval_minutes) + 1
-                n_ticks = min(max(n_ticks, 2), 500)
-                CANVAS_W = (n_ticks - 1) * TICK_SPACING_PX
-                CANVAS_W = max(CANVAS_W, 400)
+                TICK_SPACING_PX = 44
+
+                # Auto-compute a sensible tick interval if span is large
+                max_ticks = 240
+                auto_interval = time_interval_minutes
+                candidate_n = int(span_hrs * 60 / auto_interval) + 1
+                if candidate_n > max_ticks:
+                    for candidate_int in [5, 15, 30, 60, 120, 240, 480]:
+                        candidate_n = int(span_hrs * 60 / candidate_int) + 1
+                        if candidate_n <= max_ticks:
+                            auto_interval = candidate_int
+                            break
+                    else:
+                        auto_interval = max(time_interval_minutes, int(span_hrs * 60 / max_ticks) + 1)
+                        candidate_n = max_ticks
+
+                n_ticks  = min(max(candidate_n, 2), max_ticks)
+                CANVAS_W = max((n_ticks - 1) * TICK_SPACING_PX, 600)
                 PX_PER_HR = CANVAS_W / span_hrs
 
                 kpi_items = [
@@ -1541,9 +1815,14 @@ elif page == "📅 Schedule Management":
 
                 tick_items = []
                 for i in range(n_ticks):
-                    tick_hrs = i * (time_interval_minutes / 60)
+                    tick_hrs = i * (auto_interval / 60)
                     tick_dt  = t_min + timedelta(hours=tick_hrs)
-                    tick_lbl = tick_dt.strftime('%H:%M' if span_hrs <= 48 else '%b %d')
+                    if span_hrs <= 48:
+                        tick_lbl = tick_dt.strftime('%H:%M')
+                    elif span_hrs <= 168:
+                        tick_lbl = tick_dt.strftime('%d %b %H:%M')
+                    else:
+                        tick_lbl = tick_dt.strftime('%d %b')
                     tick_px  = i * TICK_SPACING_PX
                     tick_items.append((tick_px, tick_lbl))
 
@@ -1643,8 +1922,8 @@ elif page == "📅 Schedule Management":
                         f"<td class='td-machine'>{machine}</td>{cells}</tr>"
                     )
 
-                gantt_scroll_h = min(420, max(180, len(machines) * ROW_H + 24))
-                total_iframe_h = gantt_scroll_h + len(machines) * 40 + 380
+                gantt_scroll_h = min(500, max(180, len(machines) * ROW_H + 24))
+                total_iframe_h = gantt_scroll_h + len(machines) * 28 + 400
 
                 full_html = f"""<!DOCTYPE html>
 <html>
@@ -1783,7 +2062,7 @@ document.addEventListener('DOMContentLoaded', function() {{
 </head>
 <body>
 <div class='page-title'>Production Schedule Dashboard</div>
-<div class='page-sub'>Optimized Machine Time Allocation</div>
+<div class='page-sub'>{t_min.strftime('%d %b %Y %H:%M')} → {t_max.strftime('%d %b %Y %H:%M')}  |  {span_hrs:.1f} h total  |  {len(machines)} machines  |  {total_ops:,} operations</div>
 <div class='outer'>
   <div class='left-panel'>
     <div class='gantt-wrap'>
