@@ -98,6 +98,9 @@ _defaults = {
     'scenario_sched_done':    True,
     # ── Initialize Data — synthetic quick-pick ────────────────────────
     'syn_profile_selected':   None,
+    # ── Evaluation Metrics ────────────────────────────────────────────
+    'eval_result':   None,
+    'eval_task_id':  None,
     # Auth
     'auth_token':         None,
     'username':           None,
@@ -703,6 +706,7 @@ page = st.sidebar.radio(
         "📊 Buffer Optimization",
         "🔍 Bottleneck Analysis",
         "🎲 Scenario Generation",
+        "📈 Evaluation Metrics",
     ],
     key="navigation"
 )
@@ -4230,3 +4234,498 @@ elif page == "🎲 Scenario Generation":
             <b>Schedule Management → Generate Schedule</b> for advanced options.
             </div>
             """, unsafe_allow_html=True)
+
+
+# ===========================================================================
+# PAGE 8 – Evaluation Metrics  (Type 1 vs Type 2 Comparative Analysis)
+# ===========================================================================
+
+elif page == "📈 Evaluation Metrics":
+    st.title("📈 Evaluation Metrics")
+    st.markdown("""
+    <div style='background:#1a1a2e;border-left:4px solid #a78bfa;
+                padding:14px 18px;border-radius:6px;margin-bottom:20px;'>
+    <b style='color:#a78bfa'>Comparative Analysis — Type 1 vs Type 2</b><br>
+    <span style='color:#ccc'>
+    Runs both schedulers on the <b>same product set</b> and measures 4 key metrics:<br>
+    &nbsp;&nbsp;① <b>Makespan</b> — total hours from first op to last op<br>
+    &nbsp;&nbsp;② <b>Machine Utilization</b> — how efficiently machines are used (%)<br>
+    &nbsp;&nbsp;③ <b>Computational Time</b> — wall-clock seconds per scheduler<br>
+    &nbsp;&nbsp;④ <b>Idle Gap Reduction</b> — count and total hours of machine idle time
+    </span></div>
+    """, unsafe_allow_html=True)
+
+    # ── Controls ──────────────────────────────────────────────────────────────
+    em_c1, em_c2, em_c3, em_c4 = st.columns([2, 1, 1, 1])
+    with em_c1:
+        em_start = st.date_input("Schedule Start Date", value=date.today(), key="em_start_date")
+    with em_c2:
+        em_local_opt = st.slider("Type 2 MILP Machines", min_value=0, max_value=15, value=5,
+                                  key="em_local_opt",
+                                  help="Number of bottleneck machines to re-optimise with PuLP (Type 2 only).")
+    with em_c3:
+        em_compaction = st.checkbox("Type 2 Compaction", value=True, key="em_compaction",
+                                     help="Enable left-shift gap elimination for Type 2.")
+    with em_c4:
+        em_async = st.checkbox("Run in background", value=False, key="em_async",
+                                help="Submit as a Celery task and poll for results.")
+
+    if st.button("🔬 Run Comparison", type="primary", use_container_width=True, key="em_run"):
+        st.session_state.eval_result  = None
+        st.session_state.eval_task_id = None
+        params = {
+            "start_date":          em_start.isoformat(),
+            "local_opt_machines":  em_local_opt,
+            "enable_compaction":   str(em_compaction).lower(),
+        }
+        if em_async:
+            params["async_mode"] = "true"
+            with st.spinner("Submitting comparison task…"):
+                try:
+                    r = requests.get(f"{API_BASE_URL}/compare-schedulers/",
+                                     params=params, headers=get_auth_headers(), timeout=30)
+                    if r.status_code == 202:
+                        st.session_state.eval_task_id = r.json().get("task_id")
+                        st.info(f"Task submitted. ID: `{st.session_state.eval_task_id}`")
+                    else:
+                        st.error(f"Error {r.status_code}: {r.text}")
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
+        else:
+            with st.spinner("Running both schedulers — may take up to 3 minutes…"):
+                try:
+                    r = requests.get(f"{API_BASE_URL}/compare-schedulers/",
+                                     params=params, headers=get_auth_headers(), timeout=360)
+                    if r.status_code == 200:
+                        st.session_state.eval_result = r.json()
+                        st.rerun()
+                    else:
+                        st.error(f"Error {r.status_code}: {r.text}")
+                except requests.exceptions.Timeout:
+                    st.error("Timed out. Enable 'Run in background' and poll for results.")
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
+
+    # ── Async poll ────────────────────────────────────────────────────────────
+    _em_task = st.session_state.get("eval_task_id")
+    if _em_task and not st.session_state.get("eval_result"):
+        st.info(f"⏳ Background task running — ID: `{_em_task}`")
+        if st.button("🔄 Check Status", key="em_poll"):
+            with st.spinner("Checking task status…"):
+                try:
+                    r = requests.get(f"{API_BASE_URL}/task-status/{_em_task}/",
+                                     headers=get_auth_headers(), timeout=15)
+                    if r.status_code == 200:
+                        d = r.json()
+                        state = d.get("state")
+                        if state == "SUCCESS":
+                            payload = d.get("result", {})
+                            if "type1" in payload:
+                                st.session_state.eval_result  = payload
+                                st.session_state.eval_task_id = None
+                                st.rerun()
+                            else:
+                                st.error(f"Task failed: {payload.get('message')}")
+                        elif state == "FAILURE":
+                            st.error(f"Task failed: {d.get('error', 'Unknown')}")
+                        else:
+                            pct = d.get("progress", 0)
+                            msg = d.get("status", "Processing…")
+                            st.info(f"State: **{state}** — {msg} ({pct}%)")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # ── Results ───────────────────────────────────────────────────────────────
+    result = st.session_state.get("eval_result")
+
+    if not result:
+        st.markdown("""
+        <div style='text-align:center;padding:80px 0;color:#6b7280;'>
+        <div style='font-size:56px;margin-bottom:16px;'>⚖️</div>
+        <div style='font-size:18px;margin-bottom:8px;color:#9ca3af;'>No comparison results yet</div>
+        <div style='font-size:13px;'>Configure parameters above and click <b>Run Comparison</b>.</div>
+        <div style='font-size:12px;color:#4b5563;margin-top:6px;'>
+            Make sure data is initialized first (Schedule Management → Initialize Data).
+        </div>
+        </div>""", unsafe_allow_html=True)
+        st.stop()
+
+    t1   = result.get("type1", {})
+    t2   = result.get("type2", {})
+    delt = result.get("delta",  {})
+    meta = result.get("metadata", {})
+
+    # ── Recommendation banner ─────────────────────────────────────────────────
+    rec = delt.get("overall_recommendation", "")
+    t1w = delt.get("type1_quality_wins", 0)
+    t2w = delt.get("type2_quality_wins", 0)
+
+    if "Type 2" in rec:
+        _bg, _brd, _fc, _icon = "#0d2a0d", "#22c55e", "#86efac", "🟢"
+    elif "Type 1" in rec:
+        _bg, _brd, _fc, _icon = "#0d2033", "#4facfe", "#93c5fd", "🔵"
+    else:
+        _bg, _brd, _fc, _icon = "#1a1a2e", "#a78bfa", "#c4b5fd", "⚖️"
+
+    st.markdown(f"""
+    <div style='background:{_bg};border-left:5px solid {_brd};
+                padding:16px 20px;border-radius:8px;margin-bottom:22px;'>
+    <div style='color:{_fc};font-size:19px;font-weight:bold;margin-bottom:6px;'>
+        {_icon}&nbsp; {rec}
+    </div>
+    <div style='color:#9ca3af;font-size:13px;'>
+        Quality metrics (Makespan · Utilization · Gaps) —
+        Type&nbsp;1:&nbsp;<b style='color:#93c5fd'>{t1w}/4</b>&nbsp;&nbsp;
+        Type&nbsp;2:&nbsp;<b style='color:#86efac'>{t2w}/4</b>
+        &nbsp;&nbsp;·&nbsp;&nbsp;
+        Products compared:&nbsp;<b>{meta.get("products_compared", "—")}</b>
+        &nbsp;·&nbsp;
+        Start:&nbsp;<b>{str(meta.get("start_date", "—"))[:10]}</b>
+    </div>
+    </div>""", unsafe_allow_html=True)
+
+    # ── Metric scorecards ─────────────────────────────────────────────────────
+    st.markdown("### Metric Scorecards")
+
+    def _winner_label(key: str) -> str:
+        return {"type1": "Type 1", "type2": "Type 2", "tie": "Tie"}.get(key, "—")
+
+    def _winner_chip(key: str) -> str:
+        if key == "type1":
+            return ("<span style='background:#1e3a5f;color:#93c5fd;"
+                    "padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;'>"
+                    "✓ Type 1 wins</span>")
+        if key == "type2":
+            return ("<span style='background:#0d2a0d;color:#86efac;"
+                    "padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;'>"
+                    "✓ Type 2 wins</span>")
+        return ("<span style='background:#2a2a2a;color:#9ca3af;"
+                "padding:2px 9px;border-radius:12px;font-size:11px;'>Tie</span>")
+
+    # Column headers
+    h0, h1, h2 = st.columns([1.4, 2.2, 2.2])
+    h0.markdown("<p style='color:#6b7280;font-size:12px;font-weight:600;"
+                "letter-spacing:.05em;margin:0;'>METRIC</p>", unsafe_allow_html=True)
+    h1.markdown("<p style='color:#93c5fd;font-size:12px;font-weight:600;"
+                "letter-spacing:.05em;margin:0;'>TYPE 1 — SHIFT-AWARE</p>", unsafe_allow_html=True)
+    h2.markdown("<p style='color:#86efac;font-size:12px;font-weight:600;"
+                "letter-spacing:.05em;margin:0;'>TYPE 2 — ERT + MILP</p>", unsafe_allow_html=True)
+    st.markdown("<hr style='border-color:#2d2d2d;margin:6px 0 10px 0;'>", unsafe_allow_html=True)
+
+    _scorecard_rows = [
+        (
+            "① Makespan",
+            f"{t1.get('makespan_hours',0):.1f} hrs&nbsp;&nbsp;({t1.get('makespan_days',0):.1f} days)",
+            f"{t2.get('makespan_hours',0):.1f} hrs&nbsp;&nbsp;({t2.get('makespan_days',0):.1f} days)",
+            delt.get("makespan_hours_diff", 0), "{:+.1f} hrs",
+            "negative", delt.get("winner_makespan", ""),
+        ),
+        (
+            "② Utilization",
+            (f"avg {t1.get('avg_utilization_pct',0):.1f}%&nbsp;&nbsp;·&nbsp;&nbsp;"
+             f"bottleneck {t1.get('bottleneck_machine','—')} @ {t1.get('bottleneck_util_pct',0):.1f}%"),
+            (f"avg {t2.get('avg_utilization_pct',0):.1f}%&nbsp;&nbsp;·&nbsp;&nbsp;"
+             f"bottleneck {t2.get('bottleneck_machine','—')} @ {t2.get('bottleneck_util_pct',0):.1f}%"),
+            delt.get("avg_utilization_diff", 0), "{:+.1f}%",
+            "positive", delt.get("winner_utilization", ""),
+        ),
+        (
+            "③ Compute Time",
+            f"{t1.get('computation_time_seconds',0):.3f} s",
+            f"{t2.get('computation_time_seconds',0):.3f} s",
+            delt.get("computation_time_diff", 0), "{:+.3f} s",
+            "negative", delt.get("winner_speed", ""),
+        ),
+        (
+            "④ Idle Gaps",
+            (f"{t1.get('total_gaps',0)} gaps&nbsp;&nbsp;·&nbsp;&nbsp;"
+             f"{t1.get('total_idle_hours',0):.1f} idle hrs"),
+            (f"{t2.get('total_gaps',0)} gaps&nbsp;&nbsp;·&nbsp;&nbsp;"
+             f"{t2.get('total_idle_hours',0):.1f} idle hrs"),
+            delt.get("total_gaps_diff", 0), "{:+d} gaps",
+            "negative", delt.get("winner_gaps", ""),
+        ),
+    ]
+
+    for label, v1, v2, diff_val, diff_fmt, good_dir, winner in _scorecard_rows:
+        if good_dir == "negative":
+            diff_color = "#86efac" if diff_val < 0 else ("#ef4444" if diff_val > 0 else "#9ca3af")
+        else:
+            diff_color = "#86efac" if diff_val > 0 else ("#ef4444" if diff_val < 0 else "#9ca3af")
+        try:
+            diff_str = diff_fmt.format(diff_val)
+        except (ValueError, TypeError):
+            diff_str = str(diff_val)
+
+        c0, c1, c2 = st.columns([1.4, 2.2, 2.2])
+        with c0:
+            st.markdown(
+                f"<div style='padding:10px 0 4px 0;'>"
+                f"<b style='color:#e5e7eb;font-size:13px;'>{label}</b><br>"
+                f"<div style='margin-top:5px;'>{_winner_chip(winner)}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        with c1:
+            st.markdown(
+                f"<div style='background:#0d1929;border-left:3px solid #4facfe;"
+                f"padding:10px 14px;border-radius:6px;font-size:13px;"
+                f"font-family:monospace;color:#e2e8f0;line-height:1.6;'>{v1}</div>",
+                unsafe_allow_html=True,
+            )
+        with c2:
+            st.markdown(
+                f"<div style='background:#061a0d;border-left:3px solid #22c55e;"
+                f"padding:10px 14px;border-radius:6px;font-size:13px;"
+                f"font-family:monospace;color:#e2e8f0;line-height:1.6;'>"
+                f"{v2}"
+                f"<span style='float:right;color:{diff_color};font-size:11px;"
+                f"font-weight:600;'>{diff_str}</span></div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Charts ────────────────────────────────────────────────────────────────
+    st.markdown("### Charts")
+
+    _DARK = dict(
+        plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+        font=dict(color="#e2e8f0"), margin=dict(t=40, b=30, l=40, r=20),
+    )
+
+    tab_ms, tab_util, tab_ct, tab_gap = st.tabs([
+        "📏 Makespan", "📊 Utilization", "⏱️ Compute Time", "🕳️ Idle Gaps",
+    ])
+
+    # ── Makespan ──────────────────────────────────────────────────────────────
+    with tab_ms:
+        ca, cb = st.columns(2)
+        with ca:
+            fig = go.Figure(go.Bar(
+                x=["Type 1", "Type 2"],
+                y=[t1.get("makespan_hours", 0), t2.get("makespan_hours", 0)],
+                marker_color=["#4facfe", "#22c55e"],
+                text=[f"{t1.get('makespan_hours',0):.1f}", f"{t2.get('makespan_hours',0):.1f}"],
+                textposition="outside", textfont=dict(size=13),
+            ))
+            fig.update_layout(title="Makespan (hours)", yaxis_title="Hours",
+                               showlegend=False, height=340, **_DARK)
+            st.plotly_chart(fig, use_container_width=True)
+        with cb:
+            fig2 = go.Figure(go.Bar(
+                x=["Type 1", "Type 2"],
+                y=[t1.get("makespan_days", 0), t2.get("makespan_days", 0)],
+                marker_color=["#4facfe", "#22c55e"],
+                text=[f"{t1.get('makespan_days',0):.1f}", f"{t2.get('makespan_days',0):.1f}"],
+                textposition="outside", textfont=dict(size=13),
+            ))
+            fig2.update_layout(title="Makespan (days)", yaxis_title="Days",
+                                showlegend=False, height=340, **_DARK)
+            st.plotly_chart(fig2, use_container_width=True)
+        d_ms = delt.get("makespan_hours_diff", 0)
+        if d_ms < 0:
+            st.success(f"✅ Type 2 finishes **{abs(d_ms):.1f} hours earlier** than Type 1.")
+        elif d_ms > 0:
+            st.info(f"ℹ️ Type 1 finishes **{abs(d_ms):.1f} hours earlier** than Type 2.")
+        else:
+            st.info("Both schedulers produce equal makespan.")
+
+    # ── Utilization ───────────────────────────────────────────────────────────
+    with tab_util:
+        util1 = t1.get("machine_utilization", {})
+        util2 = t2.get("machine_utilization", {})
+        all_m = sorted(set(list(util1.keys()) + list(util2.keys())))
+
+        ca, cb = st.columns(2)
+        with ca:
+            fig_avg = go.Figure(go.Bar(
+                x=["Type 1", "Type 2"],
+                y=[t1.get("avg_utilization_pct", 0), t2.get("avg_utilization_pct", 0)],
+                marker_color=["#4facfe", "#22c55e"],
+                text=[f"{t1.get('avg_utilization_pct',0):.1f}%",
+                      f"{t2.get('avg_utilization_pct',0):.1f}%"],
+                textposition="outside", textfont=dict(size=13),
+            ))
+            fig_avg.update_layout(title="Average Utilization (%)", yaxis_title="%",
+                                   yaxis_range=[0, 115], showlegend=False,
+                                   height=340, **_DARK)
+            st.plotly_chart(fig_avg, use_container_width=True)
+        with cb:
+            if all_m:
+                fig_pm = go.Figure()
+                fig_pm.add_trace(go.Bar(name="Type 1", x=all_m,
+                                        y=[util1.get(m, 0) for m in all_m],
+                                        marker_color="#4facfe"))
+                fig_pm.add_trace(go.Bar(name="Type 2", x=all_m,
+                                        y=[util2.get(m, 0) for m in all_m],
+                                        marker_color="#22c55e"))
+                fig_pm.update_layout(title="Per-Machine Utilization (%)",
+                                     yaxis_title="%", yaxis_range=[0, 115],
+                                     barmode="group", height=340, **_DARK)
+                st.plotly_chart(fig_pm, use_container_width=True)
+
+        d_u = delt.get("avg_utilization_diff", 0)
+        if d_u > 0:
+            st.success(f"✅ Type 2 achieves **{abs(d_u):.1f}% higher** average utilization.")
+        elif d_u < 0:
+            st.info(f"ℹ️ Type 1 achieves **{abs(d_u):.1f}% higher** average utilization.")
+        else:
+            st.info("Both schedulers produce equal average utilization.")
+
+        bn1, bn2   = t1.get("bottleneck_machine"), t2.get("bottleneck_machine")
+        bnu1, bnu2 = t1.get("bottleneck_util_pct", 0), t2.get("bottleneck_util_pct", 0)
+        st.markdown(f"""
+        <div style='display:flex;gap:12px;margin-top:10px;'>
+        <div style='flex:1;background:#0d1929;border-left:3px solid #4facfe;
+                    padding:10px 14px;border-radius:6px;font-size:13px;color:#e2e8f0;'>
+            <b style='color:#93c5fd;'>Type 1 Bottleneck</b><br>
+            {bn1 or "—"} @ {bnu1:.1f}%
+        </div>
+        <div style='flex:1;background:#061a0d;border-left:3px solid #22c55e;
+                    padding:10px 14px;border-radius:6px;font-size:13px;color:#e2e8f0;'>
+            <b style='color:#86efac;'>Type 2 Bottleneck</b><br>
+            {bn2 or "—"} @ {bnu2:.1f}%
+        </div>
+        </div>""", unsafe_allow_html=True)
+
+    # ── Computational Time ────────────────────────────────────────────────────
+    with tab_ct:
+        ca, cb = st.columns([3, 2])
+        t1_sec = t1.get("computation_time_seconds", 0)
+        t2_sec = t2.get("computation_time_seconds", 0)
+        with ca:
+            fig_ct = go.Figure(go.Bar(
+                x=["Type 1 — Shift-Aware", "Type 2 — ERT + MILP"],
+                y=[t1_sec, t2_sec],
+                marker_color=["#4facfe", "#22c55e"],
+                text=[f"{t1_sec:.3f}s", f"{t2_sec:.3f}s"],
+                textposition="outside", textfont=dict(size=13),
+            ))
+            fig_ct.update_layout(title="Computational Time (seconds)", yaxis_title="Seconds",
+                                  showlegend=False, height=360, **_DARK)
+            st.plotly_chart(fig_ct, use_container_width=True)
+        with cb:
+            st.markdown("<br>", unsafe_allow_html=True)
+            ratio  = t2_sec / t1_sec if t1_sec > 0 else 0
+            slower = ratio >= 1
+            st.metric("Type 1 Time", f"{t1_sec:.3f} s")
+            st.metric("Type 2 Time", f"{t2_sec:.3f} s",
+                      delta=f"{delt.get('computation_time_diff', 0):+.3f} s")
+            if ratio > 0:
+                st.metric("Speed ratio",
+                          f"Type 2 is {ratio:.1f}× {'slower' if slower else 'faster'}")
+            st.caption(
+                "Type 2 runs left-shift compaction and PuLP MILP re-optimisation "
+                "on bottleneck machines. This extra time typically yields a shorter makespan."
+            )
+
+    # ── Idle Gaps ─────────────────────────────────────────────────────────────
+    with tab_gap:
+        gaps1  = t1.get("per_machine_gaps", {})
+        gaps2  = t2.get("per_machine_gaps", {})
+        all_mg = sorted(set(list(gaps1.keys()) + list(gaps2.keys())))
+
+        ca, cb = st.columns(2)
+        with ca:
+            fig_gc = go.Figure(go.Bar(
+                x=["Type 1", "Type 2"],
+                y=[t1.get("total_gaps", 0), t2.get("total_gaps", 0)],
+                marker_color=["#4facfe", "#22c55e"],
+                text=[str(t1.get("total_gaps", 0)), str(t2.get("total_gaps", 0))],
+                textposition="outside", textfont=dict(size=13),
+            ))
+            fig_gc.update_layout(title="Total Idle Gaps (count)", yaxis_title="Gaps",
+                                  showlegend=False, height=320, **_DARK)
+            st.plotly_chart(fig_gc, use_container_width=True)
+        with cb:
+            fig_ih = go.Figure(go.Bar(
+                x=["Type 1", "Type 2"],
+                y=[t1.get("total_idle_hours", 0), t2.get("total_idle_hours", 0)],
+                marker_color=["#4facfe", "#22c55e"],
+                text=[f"{t1.get('total_idle_hours',0):.1f}",
+                      f"{t2.get('total_idle_hours',0):.1f}"],
+                textposition="outside", textfont=dict(size=13),
+            ))
+            fig_ih.update_layout(title="Total Idle Hours", yaxis_title="Hours",
+                                  showlegend=False, height=320, **_DARK)
+            st.plotly_chart(fig_ih, use_container_width=True)
+
+        if all_mg:
+            st.markdown("#### Per-Machine Idle Hours")
+            fig_mg = go.Figure()
+            fig_mg.add_trace(go.Bar(
+                name="Type 1", x=all_mg,
+                y=[gaps1.get(m, {}).get("idle_hours", 0) for m in all_mg],
+                marker_color="#4facfe",
+            ))
+            fig_mg.add_trace(go.Bar(
+                name="Type 2", x=all_mg,
+                y=[gaps2.get(m, {}).get("idle_hours", 0) for m in all_mg],
+                marker_color="#22c55e",
+            ))
+            fig_mg.update_layout(
+                barmode="group", yaxis_title="Idle Hours", xaxis_title="Machine",
+                height=340, **_DARK,
+            )
+            st.plotly_chart(fig_mg, use_container_width=True)
+
+        d_g  = delt.get("total_gaps_diff", 0)
+        d_ih = delt.get("total_idle_hours_diff", 0)
+        if d_g < 0:
+            st.success(
+                f"✅ Type 2 has **{abs(d_g)} fewer gaps** and "
+                f"**{abs(d_ih):.1f} fewer idle hours** than Type 1."
+            )
+        elif d_g > 0:
+            st.info(
+                f"ℹ️ Type 1 has **{abs(d_g)} fewer gaps** and "
+                f"**{abs(d_ih):.1f} fewer idle hours** than Type 2."
+            )
+        else:
+            st.info("Both schedulers produce the same idle gap count.")
+
+    st.markdown("---")
+
+    # ── Summary table + CSV export ────────────────────────────────────────────
+    st.markdown("### Summary Table")
+
+    _tbl = pd.DataFrame([
+        {
+            "Metric":     "① Makespan",
+            "Type 1":     f"{t1.get('makespan_hours',0):.1f} hrs / {t1.get('makespan_days',0):.1f} days",
+            "Type 2":     f"{t2.get('makespan_hours',0):.1f} hrs / {t2.get('makespan_days',0):.1f} days",
+            "Δ (T2−T1)":  f"{delt.get('makespan_hours_diff',0):+.1f} hrs",
+            "Winner":     _winner_label(delt.get("winner_makespan", "")),
+        },
+        {
+            "Metric":     "② Utilization",
+            "Type 1":     f"{t1.get('avg_utilization_pct',0):.1f}%",
+            "Type 2":     f"{t2.get('avg_utilization_pct',0):.1f}%",
+            "Δ (T2−T1)":  f"{delt.get('avg_utilization_diff',0):+.1f}%",
+            "Winner":     _winner_label(delt.get("winner_utilization", "")),
+        },
+        {
+            "Metric":     "③ Compute Time",
+            "Type 1":     f"{t1.get('computation_time_seconds',0):.3f} s",
+            "Type 2":     f"{t2.get('computation_time_seconds',0):.3f} s",
+            "Δ (T2−T1)":  f"{delt.get('computation_time_diff',0):+.3f} s",
+            "Winner":     _winner_label(delt.get("winner_speed", "")),
+        },
+        {
+            "Metric":     "④ Idle Gaps",
+            "Type 1":     f"{t1.get('total_gaps',0)} gaps / {t1.get('total_idle_hours',0):.1f}h idle",
+            "Type 2":     f"{t2.get('total_gaps',0)} gaps / {t2.get('total_idle_hours',0):.1f}h idle",
+            "Δ (T2−T1)":  f"{delt.get('total_gaps_diff',0):+d} gaps",
+            "Winner":     _winner_label(delt.get("winner_gaps", "")),
+        },
+    ])
+
+    st.dataframe(_tbl, use_container_width=True, hide_index=True)
+    st.download_button(
+        "📥 Download Comparison CSV",
+        data=_tbl.to_csv(index=False).encode(),
+        file_name="evaluation_metrics.csv",
+        mime="text/csv",
+    )
