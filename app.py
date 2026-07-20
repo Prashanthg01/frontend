@@ -699,13 +699,13 @@ st.sidebar.title("🏭 Production Suite")
 page = st.sidebar.radio(
     "Navigate",
     [
-        "📊 Production Analytics",
+        # "📊 Production Analytics",
         "📅 Schedule Management",
-        "📦 Batch Optimization",
+        # "📦 Batch Optimization",
         "📋 Filter Data",
         "📊 Buffer Optimization",
         "🔍 Bottleneck Analysis",
-        "🎲 Scenario Generation",
+        # "🎲 Scenario Generation",
         "📈 Evaluation Metrics",
     ],
     key="navigation"
@@ -717,357 +717,11 @@ st.sidebar.markdown("---")
 # PAGE 1 – Production Analytics
 # ===========================================================================
 
-if page == "📊 Production Analytics":
-    st.title("📊 Production Analytics Dashboard")
-
-    with st.sidebar:
-        st.header("⚙️ Configuration")
-        uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
-
-        if uploaded_file is not None:
-            st.success("✅ File uploaded successfully!")
-            if not st.session_state.filters_loaded:
-                with st.spinner("Loading filter options..."):
-                    uploaded_file.seek(0)
-                    try:
-                        r = requests.post(f"{API_BASE_URL}/csv-filter-options/",
-                                          files={"file": uploaded_file},
-                                          headers=get_auth_headers())
-                        if r.status_code == 200:
-                            st.session_state.filter_options = r.json()
-                            st.session_state.filters_loaded = True
-                    except Exception as e:
-                        st.error(f"Error loading filters: {e}")
-
-        num_shifts = st.number_input("Number of shifts", min_value=1,
-                                     max_value=200, value=28,
-                                     help="Total number of shifts to analyse")
-
-        if st.session_state.filters_loaded and st.session_state.filter_options:
-            st.markdown("---")
-            st.subheader("🔍 Data Filters")
-            st.markdown("*Filter data by specific criteria*")
-            fo = st.session_state.filter_options
-            selected_pps_tn      = st.selectbox("PPS TN",      ["All"] + fo.get('PPS TN', []))
-            selected_project     = st.selectbox("Project",     ["All"] + fo.get('Project', []))
-            selected_sub_project = st.selectbox("Sub-Project", ["All"] + fo.get('Sub-Project', []))
-            selected_machine     = st.selectbox("Machine",     ["All"] + fo.get('Machine', []))
-            selected_tool_no     = st.selectbox("Tool No.",    ["All"] + fo.get('Tool No.', []))
-            selected_area        = st.selectbox("Area",        ["All"] + fo.get('Area', []))
-        else:
-            selected_pps_tn = selected_project = selected_sub_project = "All"
-            selected_machine = selected_tool_no = selected_area = "All"
-
-    if st.sidebar.button("🚀 Process & Analyze", type="primary", use_container_width=True):
-        if uploaded_file:
-            with st.spinner("🔄 Processing data..."):
-                uploaded_file.seek(0)
-                try:
-                    r = requests.post(
-                        f"{API_BASE_URL}/process-csv/",
-                        data={
-                            "num_shifts":   num_shifts,
-                            "pps_tn":       selected_pps_tn,
-                            "project":      selected_project,
-                            "sub_project":  selected_sub_project,
-                            "machine":      selected_machine,
-                            "tool_no":      selected_tool_no,
-                            "area":         selected_area,
-                        },
-                        files={"file": uploaded_file},
-                        headers=get_auth_headers(),
-                    )
-                    if r.status_code == 200:
-                        st.session_state.data      = r.json()
-                        st.session_state.processed = True
-                        st.sidebar.success("✅ Analysis complete!")
-                        active = [
-                            f"{label}: {val}"
-                            for label, val in [
-                                ("PPS TN", selected_pps_tn),
-                                ("Project", selected_project),
-                                ("Sub-Project", selected_sub_project),
-                                ("Machine", selected_machine),
-                                ("Tool No.", selected_tool_no),
-                                ("Area", selected_area),
-                            ]
-                            if val != "All"
-                        ]
-                        if active:
-                            st.sidebar.info("**Active Filters:**\n" +
-                                            "\n".join(f"- {f}" for f in active))
-                    else:
-                        st.error(f"❌ Error: {r.text}")
-                except Exception as e:
-                    st.error(f"❌ Connection error: {e}")
-        else:
-            st.warning("⚠️ Please upload a file first.")
-
-    if st.session_state.processed and st.session_state.data:
-        data        = st.session_state.data
-        shift_data  = data["ShiftWise"]
-        summary_data = data["Summary"]
-        df_shift    = pd.DataFrame(shift_data).T
-        df_summary  = pd.DataFrame(summary_data)
-
-        with st.sidebar:
-            st.markdown("---")
-            st.subheader("📊 Display Options")
-            metrics          = list(shift_data.keys())
-            selected_metrics = st.multiselect("Select Metrics to Display",
-                                              metrics, default=metrics)
-            all_shifts  = list(shift_data[metrics[0]].keys())
-            shift_range = st.select_slider("Select Shift Range",
-                                           options=all_shifts,
-                                           value=(all_shifts[0], all_shifts[-1]))
-            chart_type  = st.selectbox("Primary Chart Type",
-                                       ["Line Chart", "Bar Chart", "Area Chart", "Combined"])
-
-        start_idx      = all_shifts.index(shift_range[0])
-        end_idx        = all_shifts.index(shift_range[1]) + 1
-        filtered_shifts = all_shifts[start_idx:end_idx]
-
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "📊 Production Charts", "⚡ Efficiency Analysis",
-            "📋 Data Tables", "📥 Downloads"
-        ])
-
-        with tab1:
-            st.subheader("Production Output Analysis")
-            sm        = df_summary['Metric'].tolist()
-            fg_str    = df_summary['Finished Goods'].tolist()
-            conn_str  = df_summary['Connectors'].tolist()
-            fg_vals   = [float(v.replace(',','')) for v in fg_str]
-            conn_vals = [float(v.replace(',','')) for v in conn_str]
-
-            st.markdown('<div class="section-header">🎯 Finished Goods</div>',
-                        unsafe_allow_html=True)
-            c1, c2, c3, c4 = st.columns(4)
-            for col, cls, icon, idx in [
-                (c1, "metric-card-blue",   "📋", 0),
-                (c2, "metric-card-green",  "✅", 1),
-                (c3, "metric-card-orange", "⏳", 2),
-                (c4, "metric-card",        "📂", 3),
-            ]:
-                with col:
-                    st.markdown(f"""
-                    <div class="metric-card {cls}">
-                        <div class="metric-title">{icon} {sm[idx]}</div>
-                        <div class="metric-value">{fg_str[idx]}</div>
-                    </div>""", unsafe_allow_html=True)
-
-            if fg_vals[0] > 0:
-                pct = fg_vals[1] / fg_vals[0] * 100
-                st.markdown("**Production Progress**")
-                st.progress(min(pct / 100, 1.0))
-                st.markdown(
-                    f"<p style='text-align:center;color:#00ff9f;font-weight:bold;'>"
-                    f"{pct:.1f}% Complete ({fg_str[1]} / {fg_str[0]})</p>",
-                    unsafe_allow_html=True)
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            st.markdown('<div class="section-header">🔌 Connectors</div>',
-                        unsafe_allow_html=True)
-            c5, c6, c7, c8 = st.columns(4)
-            for col, cls, icon, idx in [
-                (c5, "metric-card-blue",   "📋", 0),
-                (c6, "metric-card-green",  "✅", 1),
-                (c7, "metric-card-orange", "⏳", 2),
-                (c8, "metric-card",        "📂", 3),
-            ]:
-                with col:
-                    st.markdown(f"""
-                    <div class="metric-card {cls}">
-                        <div class="metric-title">{icon} {sm[idx]}</div>
-                        <div class="metric-value">{conn_str[idx]}</div>
-                    </div>""", unsafe_allow_html=True)
-
-            if conn_vals[0] > 0:
-                pct = conn_vals[1] / conn_vals[0] * 100
-                st.markdown("**Production Progress**")
-                st.progress(min(pct / 100, 1.0))
-                st.markdown(
-                    f"<p style='text-align:center;color:#ff6b9d;font-weight:bold;'>"
-                    f"{pct:.1f}% Complete ({conn_str[1]} / {conn_str[0]})</p>",
-                    unsafe_allow_html=True)
-
-            st.markdown("---")
-
-            fg_v     = [float(shift_data['Production Output Finished Goods'][s].replace(',','')) for s in filtered_shifts]
-            conn_v   = [float(shift_data['Production Output Connectors'][s].replace(',',''))     for s in filtered_shifts]
-            backlog_v= [float(shift_data['Total Backlog Finished Goods'][s].replace(',',''))     for s in filtered_shifts]
-
-            if chart_type == "Line Chart":
-                fig = go.Figure()
-                if 'Production Output Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=fg_v, name='Finished Goods',
-                                             mode='lines+markers', line=dict(color='#00ff9f', width=3)))
-                if 'Production Output Connectors' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=conn_v, name='Connectors',
-                                             mode='lines+markers', line=dict(color='#ff6b9d', width=3)))
-                if 'Total Backlog Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=backlog_v, name='Backlog',
-                                             mode='lines+markers', line=dict(color='#ffa500', width=3)))
-
-            elif chart_type == "Bar Chart":
-                fig = go.Figure()
-                if 'Production Output Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Bar(x=filtered_shifts, y=fg_v,
-                                         name='Finished Goods', marker_color='#00ff9f'))
-                if 'Production Output Connectors' in selected_metrics:
-                    fig.add_trace(go.Bar(x=filtered_shifts, y=conn_v,
-                                         name='Connectors', marker_color='#ff6b9d'))
-                if 'Total Backlog Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Bar(x=filtered_shifts, y=backlog_v,
-                                         name='Backlog', marker_color='#ffa500'))
-                fig.update_layout(barmode='group')
-
-            elif chart_type == "Area Chart":
-                fig = go.Figure()
-                if 'Production Output Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=fg_v, name='Finished Goods',
-                                             fill='tozeroy', line=dict(color='#00ff9f')))
-                if 'Production Output Connectors' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=conn_v, name='Connectors',
-                                             fill='tozeroy', line=dict(color='#ff6b9d')))
-
-            else:  # Combined
-                fig = make_subplots(specs=[[{"secondary_y": True}]])
-                if 'Production Output Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Bar(x=filtered_shifts, y=fg_v,
-                                         name='Finished Goods', marker_color='#00ff9f'),
-                                  secondary_y=False)
-                if 'Production Output Connectors' in selected_metrics:
-                    fig.add_trace(go.Bar(x=filtered_shifts, y=conn_v,
-                                         name='Connectors', marker_color='#ff6b9d'),
-                                  secondary_y=False)
-                if 'Total Backlog Finished Goods' in selected_metrics:
-                    fig.add_trace(go.Scatter(x=filtered_shifts, y=backlog_v, name='Backlog',
-                                             mode='lines+markers',
-                                             line=dict(color='#ffa500', width=3)),
-                                  secondary_y=True)
-
-            fig.update_layout(template='plotly_dark', height=500,
-                              xaxis_title="Shifts", yaxis_title="Quantity",
-                              hovermode='x unified',
-                              legend=dict(orientation="h", yanchor="bottom",
-                                          y=1.02, xanchor="right", x=1))
-            st.plotly_chart(fig, use_container_width=True)
-
-            ch1, ch2 = st.columns(2)
-            with ch1:
-                st.markdown("#### 🎯 Production by Category")
-                pie = go.Figure(data=[go.Pie(
-                    labels=['Finished Goods', 'Connectors'],
-                    values=[sum(fg_v), sum(conn_v)],
-                    hole=0.4, marker_colors=['#00ff9f','#ff6b9d']
-                )])
-                pie.update_layout(template='plotly_dark', height=350)
-                st.plotly_chart(pie, use_container_width=True)
-            with ch2:
-                st.markdown("#### 📊 Cumulative Production")
-                cum_fig = go.Figure()
-                cum_fig.add_trace(go.Scatter(
-                    x=filtered_shifts,
-                    y=[sum(fg_v[:i+1]) for i in range(len(fg_v))],
-                    name='Finished Goods', fill='tozeroy', line=dict(color='#00ff9f')))
-                cum_fig.add_trace(go.Scatter(
-                    x=filtered_shifts,
-                    y=[sum(conn_v[:i+1]) for i in range(len(conn_v))],
-                    name='Connectors', fill='tozeroy', line=dict(color='#ff6b9d')))
-                cum_fig.update_layout(template='plotly_dark', height=350)
-                st.plotly_chart(cum_fig, use_container_width=True)
-
-        with tab2:
-            st.subheader("⚡ Overall Efficiency Analysis")
-            eff_vals   = []
-            eff_labels = []
-            for s in filtered_shifts:
-                v = shift_data['Overall Efficiency'][s]
-                if v != '-':
-                    eff_vals.append(float(v.replace('%','')))
-                    eff_labels.append(s)
-
-            eff_fig = go.Figure()
-            eff_fig.add_trace(go.Scatter(
-                x=eff_labels, y=eff_vals, mode='lines+markers',
-                name='Efficiency %',
-                line=dict(color='#00d4ff', width=4),
-                marker=dict(size=10, symbol='diamond'),
-                fill='tozeroy', fillcolor='rgba(0,212,255,0.2)'
-            ))
-            eff_fig.add_hline(y=100, line_dash="dash", line_color="green",
-                              annotation_text="Target: 100%")
-            eff_fig.update_layout(template='plotly_dark', height=400,
-                                   xaxis_title="Shifts", yaxis_title="Efficiency %",
-                                   hovermode='x unified')
-            st.plotly_chart(eff_fig, use_container_width=True)
-
-            if eff_vals:
-                e1, e2, e3, e4 = st.columns(4)
-                e1.metric("Average Efficiency", f"{sum(eff_vals)/len(eff_vals):.2f}%")
-                e2.metric("Maximum Efficiency", f"{max(eff_vals):.2f}%")
-                e3.metric("Minimum Efficiency", f"{min(eff_vals):.2f}%")
-                e4.metric("Shifts ≥100%",
-                           f"{sum(1 for e in eff_vals if e>=100)}/{len(eff_vals)}")
-
-            st.markdown("#### 📊 Efficiency Distribution")
-            hist = go.Figure(data=[go.Histogram(x=eff_vals, nbinsx=10,
-                                                 marker_color='#00d4ff', opacity=0.75)])
-            hist.update_layout(template='plotly_dark', height=300,
-                                xaxis_title="Efficiency %", yaxis_title="Frequency")
-            st.plotly_chart(hist, use_container_width=True)
-
-        with tab3:
-            st.subheader("📋 Detailed Data Tables")
-            filtered_df = df_shift[filtered_shifts].copy()
-            if selected_metrics:
-                avail = [m for m in selected_metrics if m in filtered_df.index]
-                if avail:
-                    filtered_df = filtered_df.loc[avail]
-            st.dataframe(filtered_df, use_container_width=True, height=400)
-
-        with tab4:
-            st.subheader("📥 Download Options")
-            d1, d2 = st.columns(2)
-            with d1:
-                st.markdown("#### Full Shift-wise Data")
-                st.download_button("📥 Download Full Dataset (CSV)",
-                                   data=df_shift.to_csv(index=True),
-                                   file_name="shiftwise_production_data.csv",
-                                   mime="text/csv", use_container_width=True)
-            with d2:
-                st.markdown("#### Summary Report")
-                st.download_button("📥 Download Summary (CSV)",
-                                   data=df_summary.to_csv(index=False),
-                                   file_name="production_summary.csv",
-                                   mime="text/csv", use_container_width=True)
-            st.markdown("---")
-            st.markdown("#### Filtered Data")
-            st.download_button("📥 Download Filtered Data (CSV)",
-                               data=filtered_df.to_csv(index=True),
-                               file_name="filtered_production_data.csv",
-                               mime="text/csv", use_container_width=True)
-    else:
-        st.markdown("""
-        ### 👋 Welcome to Production Analytics Dashboard
-        Upload your CSV file and configure the analysis parameters in the sidebar to get started.
-
-        **Features:**
-        - 📊 Production output tracking for Finished Goods and Connectors
-        - ⚡ Efficiency analysis across shifts
-        - 🔍 Advanced filtering by multiple criteria
-        - 📈 Interactive charts and visualizations
-        - 📥 Export capabilities for reports
-        """)
-
-
 # ===========================================================================
 # PAGE 2 – Schedule Management
 # ===========================================================================
 
-elif page == "📅 Schedule Management":
+if page == "📅 Schedule Management":
     st.title("📅 Schedule Management")
 
     tab_gen, tab_gantt, tab_timeline, tab_table = st.tabs([
@@ -2271,1208 +1925,846 @@ elif page == "📅 Schedule Management":
             except Exception as e:
                 st.error(f"Connection error: {e}")
 
-    # ── TAB 5 – KPIs ──────────────────────────────────────────────────
-#     with tab_kpi:
-#         st.subheader("📈 Schedule KPIs")
-
-#         if st.button("🔄 Refresh KPIs", type="primary"):
-#             try:
-#                 r = requests.get(f"{API_BASE_URL}/kpis/", headers=get_auth_headers(), timeout=30)
-#                 if r.ok:
-#                     st.session_state.kpi_data = r.json()
-#                 else:
-#                     st.error(f"Error {r.status_code}: {r.text}")
-#             except Exception as e:
-#                 st.error(f"Connection error: {e}")
-
-#         kpi = st.session_state.get('kpi_data')
-#         if kpi:
-#             k1, k2, k3, k4 = st.columns(4)
-#             k1.metric("Total Makespan",   f"{kpi.get('total_makespan_hours',0):.1f} h")
-#             k2.metric("Makespan (days)",  f"{kpi.get('total_makespan_days',0):.1f} d")
-#             k3.metric("Total Operations", f"{kpi.get('total_operations',0):,}")
-#             k4.metric("Units Scheduled",  f"{kpi.get('total_units_scheduled',0):,}")
-
-#             st.markdown("---")
-#             k5, k6 = st.columns(2)
-#             k5.metric("Throughput / day",  f"{kpi.get('throughput_units_per_day',0):.1f} units")
-#             k6.metric("Throughput / hour", f"{kpi.get('throughput_units_per_hour',0):.2f} units")
-
-#             bn = kpi.get('bottleneck')
-#             if bn:
-#                 st.markdown(f"""
-#                 <div style='background:#3a1a1a;border-left:4px solid #ef4444;
-#                             padding:14px 18px;border-radius:6px;margin:18px 0;'>
-#                 <b style='color:#ef4444'>🚨 Bottleneck Machine</b><br>
-#                 <span style='color:#fff;font-size:1.2rem'><b>{bn['machine']}</b></span>
-#                 &nbsp;&nbsp;
-#                 <span style='color:#fca5a5'>{bn['utilization']:.1f}% utilisation
-#                 ({bn['used_hours']:.1f} h)</span>
-#                 </div>""", unsafe_allow_html=True)
-
-#             util_rows = kpi.get('machine_utilization', [])
-#             if util_rows:
-#                 st.markdown("#### 🏭 Machine Utilisation")
-#                 df_util   = pd.DataFrame(util_rows)
-#                 col_vals  = df_util['utilization'].tolist()
-#                 util_fig  = go.Figure(go.Bar(
-#                     x=df_util['utilization'], y=df_util['machine'],
-#                     orientation='h',
-#                     marker=dict(
-#                         color=col_vals,
-#                         colorscale=[[0.0,'#10b981'],[0.6,'#f59e0b'],
-#                                     [0.85,'#ef4444'],[1.0,'#7f1d1d']],
-#                         cmin=0, cmax=100,
-#                         colorbar=dict(title='%'),
-#                     ),
-#                     text=[f"{v:.1f}%" for v in col_vals],
-#                     textposition='auto',
-#                 ))
-#                 util_fig.add_vline(x=85, line_dash='dash', line_color='red',
-#                                     annotation_text='Critical 85%',
-#                                     annotation_position='top right')
-#                 util_fig.add_vline(x=70, line_dash='dot', line_color='orange',
-#                                     annotation_text='Watch 70%',
-#                                     annotation_position='top right')
-#                 util_fig.update_layout(
-#                     template='plotly_dark',
-#                     height=max(400, 30 * len(util_rows) + 100),
-#                     xaxis_title="Utilisation (%)",
-#                     yaxis=dict(autorange='reversed'),
-#                     margin=dict(l=180),
-#                 )
-#                 st.plotly_chart(util_fig, use_container_width=True)
-
-#                 st.markdown("#### 📊 Utilisation Distribution")
-#                 hf = px.histogram(df_util, x='utilization', nbins=15,
-#                                    color_discrete_sequence=['#4facfe'],
-#                                    template='plotly_dark',
-#                                    title="Machine Utilisation Distribution",
-#                                    labels={'utilization': 'Utilisation (%)'})
-#                 hf.update_layout(height=300)
-#                 st.plotly_chart(hf, use_container_width=True)
-
-#                 st.download_button("📥 Download KPI Data (CSV)",
-#                                    data=df_util.to_csv(index=False),
-#                                    file_name="schedule_kpis.csv", mime="text/csv")
-#         else:
-#             st.info("Click **Refresh KPIs** to load schedule performance metrics.")
-
-#     # ── TAB 6 – Comparison ────────────────────────────────────────────
-#     with tab_compare:
-#         st.subheader("🔄 Schedule Comparison")
-#         st.markdown(
-#             "Compare the current saved schedule's KPIs against a re-generated preview "
-#             "(no DB write) to evaluate different optimisation settings."
-#         )
-
-#         cmp1, cmp2 = st.columns(2)
-#         with cmp1:
-#             prev_opt = st.slider("Preview: bottleneck machines to optimise",
-#                                   0, 15, 5)
-#         with cmp2:
-#             if st.button("▶️ Run Comparison", type="primary"):
-#                 with st.spinner("Fetching comparison data…"):
-#                     try:
-#                         cr = requests.get(f"{API_BASE_URL}/schedule-comparison/", headers=get_auth_headers(), timeout=30)
-#                         pr = requests.get(f"{API_BASE_URL}/optimize-schedule-preview/",
-#                                           params={'local_opt_machines': prev_opt},
-#                                           headers=get_auth_headers(), timeout=120)
-#                         if cr.ok and pr.ok:
-#                             st.session_state.compare_current = cr.json().get('current_schedule', {})
-#                             st.session_state.compare_preview = pr.json().get('preview_kpis', {})
-#                         else:
-#                             st.error("Error fetching comparison data.")
-#                     except Exception as e:
-#                         st.error(f"Connection error: {e}")
-
-#         cur  = st.session_state.get('compare_current')
-#         prev = st.session_state.get('compare_preview')
-
-#         if cur and prev:
-#             st.markdown("---")
-#             cc1, cc2 = st.columns(2)
-#             with cc1:
-#                 st.markdown("#### 📌 Current Schedule")
-#                 st.metric("Makespan",        f"{cur.get('makespan_hours',0):.1f} h")
-#                 st.metric("Operations",      f"{cur.get('total_operations',0):,}")
-#                 st.metric("Avg Utilisation", f"{cur.get('avg_utilization',0):.1f}%")
-#             with cc2:
-#                 st.markdown("#### 🔮 Preview (not saved)")
-#                 cur_mk  = cur.get('makespan_hours', 0)
-#                 prev_mk = prev.get('makespan_hours', 0)
-#                 st.metric("Makespan", f"{prev_mk:.1f} h",
-#                            delta=f"{prev_mk - cur_mk:+.1f} h", delta_color="inverse")
-#                 st.metric("Operations", f"{prev.get('total_operations',0):,}")
-#                 st.metric("Bottleneck", f"{prev.get('bottleneck_machine','—')}")
-
-#             cur_stats  = cur.get('machine_stats', [])
-#             prev_utils = prev.get('utilisation', {})
-#             if cur_stats and prev_utils:
-#                 df_cur  = pd.DataFrame(cur_stats).rename(
-#                     columns={'utilization':'Current %','machine':'Machine'})
-#                 df_prev = pd.DataFrame([{'Machine':m,'Preview %':v}
-#                                          for m,v in prev_utils.items()])
-#                 df_cmp  = (pd.merge(df_cur[['Machine','Current %']],
-#                                      df_prev, on='Machine', how='outer')
-#                              .fillna(0)
-#                              .sort_values('Current %', ascending=False))
-#                 cf = go.Figure()
-#                 cf.add_trace(go.Bar(name='Current',  x=df_cmp['Machine'],
-#                                     y=df_cmp['Current %'],  marker_color='#4facfe'))
-#                 cf.add_trace(go.Bar(name='Preview',  x=df_cmp['Machine'],
-#                                     y=df_cmp['Preview %'],  marker_color='#00f2fe'))
-#                 cf.update_layout(barmode='group', template='plotly_dark',
-#                                   title='Machine Utilisation: Current vs Preview',
-#                                   xaxis_title='Machine', yaxis_title='Utilisation (%)',
-#                                   height=400)
-#                 st.plotly_chart(cf, use_container_width=True)
-
-#     # ── TAB 7 – Gap Optimizer ─────────────────────────────────────────
-#     with tab_optimize:
-#         st.subheader("🎯 Gap Analysis & Elimination")
-
-#         with st.expander("📖 Why do gaps appear? (click to learn)", expanded=False):
-#             st.markdown("""
-# **Three root causes create the idle gaps you see on machines like Cutting Automation and SKM Seal:**
-
-# **① Precedence-induced starvation** — A machine finishes its current job and is free,
-# but the *next operation waiting for it* belongs to a batch whose upstream step (on a
-# different machine) has not finished yet.
-
-# **② Batch-interleaving gaps** — Different products share a machine. When Product A's
-# last batch finishes, Product B's next batch isn't ready yet.
-
-# **③ SPT ordering mismatches** — The greedy dispatcher sorts all operations by shortest
-# processing time globally, creating "arrival gaps".
-
-# **The fix — Left-Shift Compaction:** Enable **Gap Elimination** in the Generate tab.
-#             """)
-
-#         st.markdown("#### 📊 Load Schedule Data for Analysis")
-#         ga_src = st.radio(
-#             "Data source",
-#             ["Use already-loaded Gantt data (fast)",
-#              "Fetch fresh from API (up to 5000 ops)"],
-#             horizontal=True,
-#         )
-
-#         btn_analyze, btn_clear = st.columns([2, 1])
-#         with btn_analyze:
-#             do_analyze = st.button("🔍 Analyze Gaps Now",
-#                                    type="primary", use_container_width=True)
-#         with btn_clear:
-#             if st.button("🗑 Clear Results", use_container_width=True):
-#                 st.session_state.gap_analysis = None
-#                 st.rerun()
-
-#         if do_analyze:
-#             bars = []
-#             if "already-loaded" in ga_src:
-#                 gd = st.session_state.get('gantt_data') or st.session_state.get('timeline_data')
-#                 if gd:
-#                     bars = gd.get('gantt_bars', [])
-#                     if bars:
-#                         st.success(f"Using {len(bars):,} bars from loaded Gantt data.")
-#                     else:
-#                         st.warning("No gantt bars in loaded data.")
-#                 else:
-#                     st.warning("No Gantt data loaded. Switch to Gantt Chart tab first.")
-#             else:
-#                 with st.spinner("Fetching schedule from API…"):
-#                     try:
-#                         r2 = requests.get(f"{API_BASE_URL}/get-schedule/",
-#                                           params={'page_size': 5000}, headers=get_auth_headers(), timeout=30)
-#                         if r2.ok:
-#                             raw_rows = r2.json().get('results', [])
-#                             prods = sorted(set(row.get('product','') for row in raw_rows))
-#                             cmap  = {p: i for i, p in enumerate(prods)}
-#                             bars  = [{
-#                                 'machine':   row.get('machine', ''),
-#                                 'product':   row.get('product', ''),
-#                                 'step':      row.get('step', 0),
-#                                 'step_name': row.get('step_name', ''),
-#                                 'batch_id':  row.get('batch_id', ''),
-#                                 'batch_num': row.get('batch_num', 1),
-#                                 'start':     row.get('start', ''),
-#                                 'end':       row.get('end', ''),
-#                                 'duration_h': row.get('duration_h', 0),
-#                                 'color_key': cmap.get(row.get('product',''), 0),
-#                             } for row in raw_rows if row.get('start') and row.get('end')]
-#                             st.success(f"Fetched {len(bars):,} operations from API.")
-#                         else:
-#                             st.error(f"API error {r2.status_code}: {r2.text}")
-#                     except Exception as e:
-#                         st.error(f"Connection error: {e}")
-
-#             if bars:
-#                 st.session_state.gap_analysis = _compute_gaps_from_bars(bars)
-#                 st.session_state['_gap_bars']  = bars
-
-#         ga = st.session_state.get('gap_analysis')
-#         if not ga:
-#             st.markdown("""
-#             <div style='text-align:center;padding:50px 20px;color:#4b5563;'>
-#               <div style='font-size:52px;'>🔍</div>
-#               <div style='font-size:15px;font-weight:600;color:#6b7280;margin:10px 0;'>
-#                 No gap analysis loaded yet
-#               </div>
-#               <div style='font-size:12px;'>
-#                 Load Gantt data first, then click <b>Analyze Gaps Now</b>
-#               </div>
-#             </div>""", unsafe_allow_html=True)
-#         else:
-#             st.markdown("---")
-#             gm1, gm2, gm3, gm4 = st.columns(4)
-#             gm1.metric("Total Idle Gaps",  ga['total_gaps'])
-#             gm2.metric("Total Idle Time",  f"{ga['total_idle_hours']:.1f} h")
-#             gm3.metric("Worst Machine",    ga['worst_machine'])
-#             gm4.metric("Gap-Free Machines", ga['clean_machines'])
-
-#             causes = ga['causes']
-#             total_c = sum(causes.values()) or 1
-#             st.markdown("#### 🔬 Gap Cause Breakdown")
-#             cc1, cc2, cc3 = st.columns(3)
-#             cc1.metric("① Precedence-induced",
-#                        f"{causes['precedence']} gaps",
-#                        f"{causes['precedence']/total_c*100:.0f}% of gaps")
-#             cc2.metric("② Batch-interleaving",
-#                        f"{causes['interleave']} gaps",
-#                        f"{causes['interleave']/total_c*100:.0f}% of gaps")
-#             cc3.metric("③ SPT ordering",
-#                        f"{causes['spt']} gaps",
-#                        f"{causes['spt']/total_c*100:.0f}% of gaps")
-
-#             st.markdown("#### 📊 Idle Time by Machine")
-#             df_ms = pd.DataFrame(ga['machine_stats'])
-#             if not df_ms.empty:
-#                 df_ms = df_ms.sort_values('idle_hours', ascending=False)
-#                 bar_colors = [
-#                     '#ef4444' if v > 4 else '#f59e0b' if v > 1 else '#22c55e'
-#                     for v in df_ms['idle_hours']
-#                 ]
-#                 idle_fig = go.Figure()
-#                 idle_fig.add_trace(go.Bar(
-#                     x=df_ms['machine'], y=df_ms['idle_hours'],
-#                     name='Idle Hours', marker_color=bar_colors,
-#                     text=[f"{v:.2f}h" for v in df_ms['idle_hours']],
-#                     textposition='auto',
-#                 ))
-#                 idle_fig.add_trace(go.Scatter(
-#                     x=df_ms['machine'], y=df_ms['gap_count'],
-#                     name='Gap Count', yaxis='y2',
-#                     mode='markers+lines',
-#                     marker=dict(color='#a78bfa', size=9, symbol='diamond'),
-#                     line=dict(color='#a78bfa', width=2, dash='dot'),
-#                 ))
-#                 idle_fig.update_layout(
-#                     template='plotly_dark', height=380,
-#                     title='Machine Idle Time and Gap Count',
-#                     xaxis_title='Machine',
-#                     yaxis=dict(title='Idle Hours'),
-#                     yaxis2=dict(title='Gap Count', overlaying='y', side='right'),
-#                     legend=dict(orientation='h', y=1.08),
-#                     margin=dict(b=120),
-#                 )
-#                 idle_fig.update_xaxes(tickangle=30)
-#                 st.plotly_chart(idle_fig, use_container_width=True)
-
-#             with st.expander(f"📋 Full Gap List ({ga['total_gaps']} gaps)"):
-#                 df_gl = pd.DataFrame(ga['gap_list'])
-#                 if not df_gl.empty:
-#                     df_gl = df_gl.sort_values('idle_hours', ascending=False)
-#                     for col in ['gap_start', 'gap_end']:
-#                         df_gl[col] = (pd.to_datetime(df_gl[col], format='ISO8601', utc=True)
-#                                       .dt.tz_localize(None)
-#                                       .dt.strftime('%Y-%m-%d %H:%M'))
-#                     st.dataframe(
-#                         df_gl[['machine','gap_start','gap_end',
-#                                'idle_hours','cause','before_op','after_op']],
-#                         use_container_width=True, height=320
-#                     )
-#                     st.download_button(
-#                         "📥 Download Gap Report (CSV)",
-#                         data=df_gl.to_csv(index=False),
-#                         file_name="gap_analysis.csv", mime="text/csv",
-#                     )
-
-#             st.markdown("---")
-#             st.markdown("### 🔧 Fix These Gaps")
-#             fc1, fc2 = st.columns([3, 1])
-#             with fc1:
-#                 fix_date = st.date_input("Start date for re-schedule",
-#                                           value=date.today(), key="gap_fix_date")
-#             with fc2:
-#                 fix_opt = st.number_input("Bottleneck machines (MILP)",
-#                                            min_value=0, max_value=15, value=5,
-#                                            key="gap_fix_opt")
-
-#             if st.button("🚀 Re-Generate with Gap Elimination",
-#                          type="primary", use_container_width=True):
-#                 payload = {
-#                     'start_date':         fix_date.isoformat(),
-#                     'local_opt_machines': fix_opt,
-#                     'clear_existing':     True,
-#                     'enable_compaction':  True,
-#                     'batch_overrides':    st.session_state.get('batch_overrides', []),
-#                     'async_mode':         True,
-#                 }
-#                 try:
-#                     r = requests.post(f"{API_BASE_URL}/generate-schedule/",
-#                                       json=payload, headers=get_auth_headers(), timeout=30)
-#                     if r.status_code in (200, 201, 202):
-#                         task_id = r.json().get('task_id')
-#                         if task_id:
-#                             st.session_state.schedule_task_id   = task_id
-#                             st.session_state.schedule_task_done = False
-#                             st.session_state.gap_analysis       = None
-#                             st.success(f"✅ Gap-elimination schedule submitted — Task `{task_id}`")
-#                             st.info("Switch to **⚙️ Generate Schedule** tab to watch progress.")
-#                     else:
-#                         st.error(f"Error {r.status_code}: {r.text}")
-#                 except Exception as e:
-#                     st.error(f"Connection error: {e}")
-
 
 # ===========================================================================
 # PAGE 3 – Batch Optimization
 # ===========================================================================
 
-elif page == "📦 Batch Optimization":
-    st.title("📦 Batch Size Optimization")
-
-    # ── Info banner ────────────────────────────────────────────────────────────
-    st.markdown("""
-    <div style='background:#1a2a3a;border-left:4px solid #4facfe;
-                padding:14px 18px;border-radius:6px;margin-bottom:18px;'>
-    <b style='color:#4facfe'>ℹ️ Two Optimization Modes</b><br>
-    <span style='color:#ccc'>
-    <b style='color:#00f2fe'>Individual ILP</b> — optimises each product independently,
-    minimising the number of batches subject to size constraints.<br>
-    <b style='color:#38ef7d'>Joint ILP (new)</b> — optimises ALL products simultaneously,
-    minimising the <i>worst machine load</i> (makespan proxy) to balance utilisation
-    across all machines and avoid bottlenecks.
-    </span></div>
-    """, unsafe_allow_html=True)
-
-    # ── Adaptive bounds explanation (the bug fix) ──────────────────────────────
-    with st.expander("⚠️ Why min/max batch size is applied adaptively (important)", expanded=False):
-        st.markdown("""
-**Problem with fixed global bounds:**
-
-Your products span a very wide demand range — from **100 units** to **319,908 units**.
-A fixed `min_batch=50, max_batch=500` causes two failure modes:
-
-| Demand | Issue | What happened before fix |
-|--------|-------|--------------------------|
-| 121 | `max_batch=500 > demand=121` → ILP was forced to pick batch=500 for 1 batch, ignoring that only 121 units are needed | `new_batch_size=500, new_num_batches=1` ❌ |
-| 319,908 | `ceil(319908/n) > 500` for **every** n ∈ [1..25] → ILP had no feasible solution at all | Fell back to naive heuristic ❌ |
-
-**The fix — adaptive bounds per product:**
-```
-true_min = ceil(demand / max_num_batches)   # smallest batch using all slots
-true_max = demand                            # one big batch (N=1)
-
-effective_min = max(user_min, true_min)
-effective_max = min(user_max, true_max)
-
-if effective_min > effective_max:            # user bounds incompatible with demand
-    use (true_min, true_max) instead
-```
-Your `min_batch_size` and `max_batch_size` parameters are now treated as **preferences**.
-The ILP clamps them to what is actually achievable for each product's demand level.
-        """)
-
-    st.markdown("---")
-
-    # ── Parameters ─────────────────────────────────────────────────────────────
-    st.markdown("### ⚙️ Optimization Parameters")
-    bp1, bp2, bp3, bp4 = st.columns(4)
-    with bp1:
-        max_num_batches = st.number_input(
-            "Max number of batches", min_value=1, max_value=100, value=25,
-            help="Upper bound for N in the ILP"
-        )
-    with bp2:
-        min_batch_size = st.number_input(
-            "Min batch size (preferred)", min_value=1, max_value=100000, value=50,
-            help="Preferred minimum units per batch. Applied where feasible for the product's demand."
-        )
-    with bp3:
-        max_batch_size = st.number_input(
-            "Max batch size (preferred)", min_value=1, max_value=1000000, value=500,
-            help="Preferred maximum units per batch. Clamped to demand when demand < this value."
-        )
-    with bp4:
-        batch_async = st.checkbox(
-            "Run async (Celery)", value=False,
-            help="Use background task for large product catalogs"
-        )
-
-    params = {
-        "max_num_batches": int(max_num_batches),
-        "min_batch_size":  int(min_batch_size),
-        "max_batch_size":  int(max_batch_size),
-    }
-
-    st.markdown("---")
-
-    # ── Page tabs ──────────────────────────────────────────────────────────────
-    tab_indiv, tab_joint = st.tabs([
-        "🔢 Individual Optimization",
-        "🤝 Joint Optimization (balance machine loads)",
-    ])
-
-    # ==========================================================================
-    # TAB 1 — Individual ILP (existing, with adaptive bounds fix)
-    # ==========================================================================
-    with tab_indiv:
-        st.markdown("""
-        <div style='background:#0d1a2d;border-left:3px solid #4facfe;
-                    padding:8px 14px;border-radius:4px;font-size:12px;
-                    color:#93c5fd;margin-bottom:14px;'>
-        Optimises each product independently. Objective: minimise number of batches N
-        while keeping batch size within adaptive bounds. Fast — runs product-by-product.
-        </div>
-        """, unsafe_allow_html=True)
-
-        ia1, ia2 = st.columns(2)
-        with ia1:
-            indiv_preview = st.button(
-                "🔍 Preview (no DB write)",
-                type="primary", use_container_width=True
-            )
-        with ia2:
-            indiv_save = st.button(
-                "💾 Save to Database",
-                type="secondary", use_container_width=True
-            )
-
-        # ── Preview ───────────────────────────────────────────────────────────
-        if indiv_preview:
-            _params_async = {**params, "async_mode": "true" if batch_async else "false"}
-            if batch_async:
-                with st.spinner("Submitting preview task…"):
-                    try:
-                        r = requests.get(
-                            f"{API_BASE_URL}/batch-optimization-preview/",
-                            params=_params_async, headers=get_auth_headers(), timeout=30
-                        )
-                        if r.status_code == 202:
-                            st.session_state.batch_preview_task_id = r.json().get("task_id")
-                            st.session_state.batch_preview_result  = None
-                            st.success(f"Task submitted: `{st.session_state.batch_preview_task_id}`")
-                        else:
-                            st.error(f"Error {r.status_code}: {r.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
-            else:
-                with st.spinner("Running ILP for all products…"):
-                    try:
-                        r = requests.get(
-                            f"{API_BASE_URL}/batch-optimization-preview/",
-                            params=params, headers=get_auth_headers(), timeout=300
-                        )
-                        if r.status_code == 200:
-                            st.session_state.batch_preview_result  = r.json()
-                            st.session_state.batch_preview_task_id = None
-                            st.success("✅ Preview complete!")
-                        else:
-                            st.error(f"Error {r.status_code}: {r.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
-
-        btask = st.session_state.get("batch_preview_task_id")
-        if btask:
-            st.markdown("#### ⏳ Preview Task")
-            pb  = st.progress(0)
-            txt = st.empty()
-            res = poll_task_until_complete(btask, pb, txt, max_wait_seconds=600)
-            if res:
-                st.session_state.batch_preview_result  = res
-                st.session_state.batch_preview_task_id = None
-                st.rerun()
-
-        # ── Save ──────────────────────────────────────────────────────────────
-        if indiv_save:
-            if batch_async:
-                with st.spinner("Submitting save task…"):
-                    try:
-                        r = requests.post(
-                            f"{API_BASE_URL}/batch-optimization-save/",
-                            json={**params, "async_mode": "true"},
-                            headers=get_auth_headers(), timeout=30
-                        )
-                        if r.status_code == 202:
-                            st.session_state.batch_save_task_id = r.json().get("task_id")
-                            st.session_state.batch_save_result  = None
-                            st.success(f"Save task: `{st.session_state.batch_save_task_id}`")
-                        else:
-                            st.error(f"Error {r.status_code}: {r.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
-            else:
-                with st.spinner("Applying to database…"):
-                    try:
-                        r = requests.post(
-                            f"{API_BASE_URL}/batch-optimization-save/",
-                            json=params, headers=get_auth_headers(), timeout=300
-                        )
-                        if r.status_code == 200:
-                            st.session_state.batch_save_result  = r.json()
-                            st.session_state.batch_save_task_id = None
-                            st.success("✅ Saved!")
-                        else:
-                            st.error(f"Error {r.status_code}: {r.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
-
-        stask = st.session_state.get("batch_save_task_id")
-        if stask:
-            st.markdown("#### ⏳ Save Task")
-            pb2  = st.progress(0)
-            txt2 = st.empty()
-            res2 = poll_task_until_complete(stask, pb2, txt2, max_wait_seconds=600)
-            if res2:
-                st.session_state.batch_save_result  = res2
-                st.session_state.batch_save_task_id = None
-                st.rerun()
-
-        # ── Save result banner ────────────────────────────────────────────────
-        save_result = st.session_state.get("batch_save_result")
-        if isinstance(save_result, dict) and save_result.get("status") != "error":
-            upd  = save_result.get("total_updated", 0)
-            skip = save_result.get("total_skipped", 0)
-            st.markdown(f"""
-            <div style='background:#0a2a0a;border-left:4px solid #22c55e;
-                        padding:14px 18px;border-radius:6px;margin:12px 0;'>
-            <b style='color:#22c55e'>✅ Database Updated</b><br>
-            <span style='color:#ccc'>
-            <b style='color:#86efac'>{upd}</b> products updated &nbsp;|&nbsp;
-            <b style='color:#fca5a5'>{skip}</b> skipped
-            </span></div>
-            """, unsafe_allow_html=True)
-            updated_list = save_result.get("updated_products", [])
-            if updated_list:
-                with st.expander(f"📋 {len(updated_list)} updated products"):
-                    df_upd = pd.DataFrame(updated_list)
-                    df_upd["Batch Size Δ"]   = df_upd["new_batch_size"]  - df_upd["old_batch_size"]
-                    df_upd["Num Batches Δ"]  = df_upd["new_num_batches"] - df_upd["old_num_batches"]
-                    st.dataframe(df_upd, use_container_width=True, height=300)
-                    st.download_button("📥 CSV", data=df_upd.to_csv(index=False),
-                                       file_name="indiv_batch_updates.csv", mime="text/csv")
-
-        # ── Preview results ───────────────────────────────────────────────────
-        preview = st.session_state.get("batch_preview_result")
-        if not preview:
-            st.info("Click **🔍 Preview** to run the individual ILP and see results.")
-        else:
-            summary  = preview.get("summary", {})
-            analysis = preview.get("batch_analysis", [])
-
-            st.markdown("---")
-            st.markdown("### 📊 Individual Optimization Results")
-
-            sm1, sm2, sm3, sm4, sm5 = st.columns(5)
-            sm1.metric("Products",       summary.get("total_products", 0))
-            sm2.metric("Total Demand",   f"{summary.get('total_demand', 0):,}")
-            sm3.metric("Total Batches",  summary.get("total_batches", 0))
-            sm4.metric("Avg Batch Size", summary.get("avg_batch_size", 0))
-            sm5.metric("Std Dev",        summary.get("std_batch_size", 0))
-
-            # Adaptive bounds note
-            if summary.get("note"):
-                st.info(f"ℹ️ {summary['note']}")
-
-            if analysis:
-                df_a = pd.DataFrame(analysis)
-                df_a["improvement_pct"] = (
-                    df_a["improvement"]
-                    .str.replace("%", "", regex=False)
-                    .astype(float)
-                )
-                df_a["batch_reduction"]   = df_a["old_num_batches"] - df_a["new_num_batches"]
-                df_a["batch_size_change"] = df_a["new_batch_size"]  - df_a["old_batch_size"]
-
-                ptab1, ptab2, ptab3, ptab4 = st.tabs([
-                    "📈 Charts", "📋 Full Table", "🏆 Top Improvements", "🔬 ILP Detail"
-                ])
-
-                with ptab1:
-                    df_top20 = df_a.nlargest(20, "demand")
-
-                    st.markdown("#### Batch Count: Old (12) vs New — top 20 by demand")
-                    fig_bc = go.Figure()
-                    fig_bc.add_trace(go.Bar(name="Old (12)", x=df_top20["item"].astype(str),
-                                            y=df_top20["old_num_batches"], marker_color="#4facfe"))
-                    fig_bc.add_trace(go.Bar(name="New (ILP)", x=df_top20["item"].astype(str),
-                                            y=df_top20["new_num_batches"], marker_color="#00f2fe"))
-                    fig_bc.update_layout(barmode="group", template="plotly_dark", height=380,
-                                          xaxis_title="Item", yaxis_title="# Batches",
-                                          legend=dict(orientation="h", y=1.1))
-                    st.plotly_chart(fig_bc, use_container_width=True)
-
-                    st.markdown("#### Batch Size: Old vs New vs Ideal")
-                    fig_bs = go.Figure()
-                    fig_bs.add_trace(go.Scatter(name="Old", x=df_top20["item"].astype(str),
-                                                y=df_top20["old_batch_size"],
-                                                mode="lines+markers", line=dict(color="#f59e0b")))
-                    fig_bs.add_trace(go.Scatter(name="New", x=df_top20["item"].astype(str),
-                                                y=df_top20["new_batch_size"],
-                                                mode="lines+markers", line=dict(color="#22c55e")))
-                    fig_bs.add_trace(go.Scatter(name="Ideal", x=df_top20["item"].astype(str),
-                                                y=df_top20["ideal_batch_size"],
-                                                mode="lines", line=dict(color="#a78bfa", dash="dot")))
-                    fig_bs.update_layout(template="plotly_dark", height=360,
-                                          xaxis_title="Item", yaxis_title="Batch Size",
-                                          legend=dict(orientation="h", y=1.1))
-                    st.plotly_chart(fig_bs, use_container_width=True)
-
-                    # Effective bounds annotation
-                    if "effective_min_batch" in df_a.columns:
-                        st.markdown("#### Adaptive Bounds Applied")
-                        bounds_fig = go.Figure()
-                        bounds_fig.add_trace(go.Bar(
-                            name="Eff. Min Batch", x=df_a["item"].astype(str),
-                            y=df_a["effective_min_batch"], marker_color="rgba(239,68,68,0.5)"
-                        ))
-                        bounds_fig.add_trace(go.Bar(
-                            name="New Batch Size", x=df_a["item"].astype(str),
-                            y=df_a["new_batch_size"], marker_color="#22c55e"
-                        ))
-                        bounds_fig.add_trace(go.Bar(
-                            name="Eff. Max Batch", x=df_a["item"].astype(str),
-                            y=df_a["effective_max_batch"], marker_color="rgba(59,130,246,0.4)"
-                        ))
-                        bounds_fig.update_layout(
-                            barmode="overlay", template="plotly_dark", height=340,
-                            title="Adaptive Bounds vs Chosen Batch Size (each product)",
-                            xaxis_title="Item", yaxis_title="Units",
-                            legend=dict(orientation="h", y=1.1),
-                        )
-                        st.plotly_chart(bounds_fig, use_container_width=True)
-
-                    c_l, c_r = st.columns(2)
-                    with c_l:
-                        fig_hist = px.histogram(df_a, x="improvement_pct", nbins=20,
-                                                 color_discrete_sequence=["#4facfe"],
-                                                 template="plotly_dark",
-                                                 title="Improvement Distribution (%)")
-                        fig_hist.update_layout(height=280)
-                        st.plotly_chart(fig_hist, use_container_width=True)
-                    with c_r:
-                        fig_sc = px.scatter(df_a, x="demand", y="batch_reduction",
-                                             color="improvement_pct",
-                                             color_continuous_scale="Viridis",
-                                             template="plotly_dark",
-                                             hover_data=["item", "new_batch_size"],
-                                             title="Demand vs Batch Reduction")
-                        fig_sc.update_layout(height=280)
-                        st.plotly_chart(fig_sc, use_container_width=True)
-
-                with ptab2:
-                    display_cols = [
-                        "item", "description", "demand",
-                        "old_batch_size", "old_num_batches",
-                        "new_batch_size", "new_num_batches",
-                        "ideal_batch_size", "improvement",
-                        "batch_reduction", "batch_size_change",
-                    ]
-                    if "effective_min_batch" in df_a.columns:
-                        display_cols += ["effective_min_batch", "effective_max_batch"]
-
-                    df_display = df_a[display_cols].copy()
-
-                    def _color_impr(val):
-                        try:
-                            v = float(str(val).replace("%", ""))
-                            if v > 30: return "background:#14532d;color:#86efac"
-                            if v > 10: return "background:#1a3a0a;color:#bef264"
-                            if v > 0:  return "background:#1a2a0a;color:#d9f99d"
-                        except Exception:
-                            pass
-                        return ""
-
-                    st.dataframe(
-                        df_display.style.applymap(_color_impr, subset=["improvement"]),
-                        use_container_width=True, height=500
-                    )
-                    st.download_button("📥 Download CSV",
-                                       data=df_display.to_csv(index=False),
-                                       file_name="indiv_preview.csv", mime="text/csv")
-
-                with ptab3:
-                    df_top10 = df_a.nlargest(10, "improvement_pct")
-                    for _, row in df_top10.iterrows():
-                        impr  = row["improvement_pct"]
-                        color = "#22c55e" if impr > 30 else "#f59e0b" if impr > 10 else "#6b7280"
-                        st.markdown(f"""
-                        <div style='background:#0d1a0d;border-left:4px solid {color};
-                                    border-radius:6px;padding:10px 16px;margin-bottom:8px;
-                                    display:flex;justify-content:space-between;'>
-                          <div>
-                            <b style='color:#d1d5db'>Item {int(row["item"])}</b>
-                            <span style='color:#6b7280;font-size:12px;margin-left:8px;'>
-                              {str(row["description"])[:45]}
-                            </span><br>
-                            <span style='color:#9ca3af;font-size:11px;'>
-                              Demand: {int(row["demand"]):,}
-                            </span>
-                          </div>
-                          <div style='text-align:right;'>
-                            <b style='color:{color};font-size:16px;'>{impr:.1f}%</b><br>
-                            <span style='color:#9ca3af;font-size:11px;'>
-                              {int(row["old_num_batches"])}→{int(row["new_num_batches"])} batches &nbsp;|&nbsp;
-                              {int(row["old_batch_size"])}→{int(row["new_batch_size"])} units/batch
-                            </span>
-                          </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                    df_zero = df_a[df_a["improvement_pct"] == 0]
-                    if not df_zero.empty:
-                        st.markdown(f"#### ⚪ {len(df_zero)} products unchanged")
-                        st.dataframe(df_zero[["item", "description", "demand",
-                                              "old_batch_size", "new_batch_size"]],
-                                     use_container_width=True, height=200)
-
-                with ptab4:
-                    st.markdown("#### ILP Formulation")
-                    st.json({
-                        "solver": "PuLP (CBC)",
-                        "objective": "Minimize N (number of batches per product)",
-                        "adaptive_bounds": {
-                            "effective_min": "max(user_min, ceil(demand/max_num_batches))",
-                            "effective_max": "min(user_max, demand)",
-                            "fallback": "use (ceil(demand/max_N), demand) if intersection empty"
-                        },
-                        "variables": {
-                            "B": "batch_size ∈ [eff_min, eff_max] integer",
-                            "N": f"num_batches ∈ [1, {int(max_num_batches)}] integer",
-                            "y_n": f"binary selector n ∈ [1..{int(max_num_batches)}]"
-                        },
-                        "key_constraints": [
-                            "sum(y_n) == 1",
-                            "N == sum(n*y_n)",
-                            "B >= ceil(demand/n) - M*(1-y_n)  ∀n",
-                            "y_n == 0 if ceil(demand/n) > eff_max"
-                        ],
-                        "parameters_used": params
-                    })
-
-    # ==========================================================================
-    # TAB 2 — Joint Multi-Product ILP (NEW)
-    # ==========================================================================
-    with tab_joint:
-        st.markdown("""
-        <div style='background:#0d200d;border-left:3px solid #38ef7d;
-                    padding:8px 14px;border-radius:4px;font-size:12px;
-                    color:#86efac;margin-bottom:14px;'>
-        Optimises ALL products simultaneously in a single MILP.
-        Objective: <b>minimise C</b> (the worst machine load hours — the bottleneck).
-        Machine-load constraints link batch decisions across products,
-        producing a balanced schedule rather than per-product greedy choices.
-        </div>
-        """, unsafe_allow_html=True)
-
-        # ── Why joint matters visual ───────────────────────────────────────────
-        with st.expander("📖 Why Joint Optimization? (visual explanation)", expanded=False):
-            st.markdown("""
-**Before (Individual, independent optimization):**
-```
-Machine 1: ████████████████████████ 95%  ← BOTTLENECK
-Machine 2: ████                      20%  ← IDLE
-Machine 3: ██████                    30%
-```
-Each product's ILP ignores other products' machine use.
-Product A and B both independently decide to use Machine 1 heavily.
-
-**After (Joint optimization):**
-```
-Machine 1: ██████████████  65%
-Machine 2: █████████████   60%
-Machine 3: ████████████    55%
-```
-The joint MILP sees all machine constraints at once. It shifts some products
-to use different batch counts so no single machine becomes overloaded.
-
-**Result:** Lower makespan → faster total production → better schedule quality.
-
-**MILP Formulation:**
-```
-Minimize  C                                    ← worst machine load (hours)
-
-For each product i:
-  Σ_n  y_{i,n}  =  1                          ← exactly one batch count chosen
-  y_{i,n}  ∈  {0,1}
-
-For each machine m:
-  Σ_{i,n}  load_{i,m,n} × y_{i,n}  ≤  C      ← all machine loads ≤ C
-
-where  load_{i,m,n}  =  cycle_time_{i,m} × ceil(demand_i/n) × n  /  3600
-```
-            """)
-
-        # ── Solver time limit control ──────────────────────────────────────────
-        jt1, jt2 = st.columns(2)
-        with jt1:
-            time_limit = st.number_input(
-                "Solver time limit (seconds)", min_value=10,
-                max_value=600, value=120,
-                help="CBC will stop and return best solution found within this time"
-            )
-        with jt2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.info(
-                f"Joint ILP size: ~{int(max_num_batches)} × products binary vars. "
-                "For 39 products this is ~975 binaries — typically solved in <30s."
-            )
-
-        ja1, ja2 = st.columns(2)
-        with ja1:
-            joint_preview_btn = st.button(
-                "🔍 Joint Preview (no DB write)",
-                type="primary", use_container_width=True
-            )
-        with ja2:
-            joint_save_btn = st.button(
-                "💾 Joint Save to Database",
-                type="secondary", use_container_width=True
-            )
-
-        # ── Joint Preview ──────────────────────────────────────────────────────
-        if joint_preview_btn:
-            if batch_async:
-                with st.spinner("Submitting joint preview task…"):
-                    try:
-                        r = requests.get(
-                            f"{API_BASE_URL}/batch-optimization-joint-preview/",
-                            params={**params, "async_mode": "true"},
-                            headers=get_auth_headers(), timeout=30
-                        )
-                        if r.status_code == 202:
-                            st.session_state.joint_preview_task_id = r.json().get("task_id")
-                            st.session_state.joint_preview_result  = None
-                            st.success(f"Task: `{st.session_state.joint_preview_task_id}`")
-                        else:
-                            st.error(f"Error {r.status_code}: {r.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
-            else:
-                with st.spinner(f"Running joint MILP (up to {time_limit}s)…"):
-                    try:
-                        r = requests.get(
-                            f"{API_BASE_URL}/batch-optimization-joint-preview/",
-                            params=params, headers=get_auth_headers(),
-                            timeout=time_limit + 60
-                        )
-                        if r.status_code == 200:
-                            st.session_state.joint_preview_result  = r.json()
-                            st.session_state.joint_preview_task_id = None
-                            st.success("✅ Joint preview complete!")
-                        else:
-                            st.error(f"Error {r.status_code}: {r.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
-
-        jptask = st.session_state.get("joint_preview_task_id")
-        if jptask:
-            st.markdown("#### ⏳ Joint Preview Task")
-            jpb  = st.progress(0)
-            jtxt = st.empty()
-            jres = poll_task_until_complete(jptask, jpb, jtxt, max_wait_seconds=600)
-            if jres:
-                st.session_state.joint_preview_result  = jres
-                st.session_state.joint_preview_task_id = None
-                st.rerun()
-
-        # ── Joint Save ─────────────────────────────────────────────────────────
-        if joint_save_btn:
-            if batch_async:
-                with st.spinner("Submitting joint save task…"):
-                    try:
-                        r = requests.post(
-                            f"{API_BASE_URL}/batch-optimization-joint/",
-                            json={**params, "async_mode": "true"},
-                            headers=get_auth_headers(), timeout=30
-                        )
-                        if r.status_code == 202:
-                            st.session_state.joint_save_task_id = r.json().get("task_id")
-                            st.session_state.joint_save_result  = None
-                            st.success(f"Task: `{st.session_state.joint_save_task_id}`")
-                        else:
-                            st.error(f"Error {r.status_code}: {r.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
-            else:
-                with st.spinner(f"Running joint MILP and saving (up to {time_limit}s)…"):
-                    try:
-                        r = requests.post(
-                            f"{API_BASE_URL}/batch-optimization-joint/",
-                            json=params, headers=get_auth_headers(),
-                            timeout=time_limit + 60
-                        )
-                        if r.status_code == 200:
-                            st.session_state.joint_save_result  = r.json()
-                            st.session_state.joint_save_task_id = None
-                            st.success("✅ Joint optimization saved to database!")
-                        else:
-                            st.error(f"Error {r.status_code}: {r.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
-
-        jstask = st.session_state.get("joint_save_task_id")
-        if jstask:
-            st.markdown("#### ⏳ Joint Save Task")
-            jsb  = st.progress(0)
-            jst  = st.empty()
-            jsr  = poll_task_until_complete(jstask, jsb, jst, max_wait_seconds=600)
-            if jsr:
-                st.session_state.joint_save_result  = jsr
-                st.session_state.joint_save_task_id = None
-                st.rerun()
-
-        # ── Joint Save result banner ───────────────────────────────────────────
-        j_save = st.session_state.get("joint_save_result")
-        if isinstance(j_save, dict) and j_save.get("status") != "error":
-            upd = j_save.get("products_updated", 0)
-            st.markdown(f"""
-            <div style='background:#0a2a0a;border-left:4px solid #22c55e;
-                        padding:14px 18px;border-radius:6px;margin:12px 0;'>
-            <b style='color:#22c55e'>✅ Joint Optimization Applied to Database</b><br>
-            <span style='color:#ccc'>
-            <b style='color:#86efac'>{upd}</b> products updated &nbsp;|&nbsp;
-            Makespan proxy: <b style='color:#38ef7d'>{j_save.get("makespan_proxy", 0):.1f}h</b> &nbsp;|&nbsp;
-            Solver: <b>{j_save.get("status", "—")}</b>
-            </span></div>
-            """, unsafe_allow_html=True)
-
-        # ── Joint results display ──────────────────────────────────────────────
-        j_preview = (
-            st.session_state.get("joint_preview_result") or
-            st.session_state.get("joint_save_result")
-        )
-
-        if not j_preview:
-            st.markdown("""
-            <div style='text-align:center;padding:50px 20px;color:#4b5563;'>
-              <div style='font-size:52px;'>🤝</div>
-              <div style='font-size:15px;font-weight:600;color:#6b7280;margin:10px 0;'>
-                No joint optimization loaded yet
-              </div>
-              <div style='font-size:12px;'>
-                Click <b>🔍 Joint Preview</b> to run the multi-product MILP
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            analysis      = j_preview.get("batch_analysis", [])
-            machine_loads = j_preview.get("machine_loads", {})
-            summary       = j_preview.get("summary", {})
-            solver_status = j_preview.get("status", "unknown")
-
-            st.markdown("---")
-
-            # Solver status badge
-            badge_color = "#22c55e" if solver_status == "optimal" else "#f59e0b"
-            st.markdown(
-                f"<span style='background:{badge_color};color:#000;padding:4px 12px;"
-                f"border-radius:12px;font-size:12px;font-weight:700;'>"
-                f"Solver: {solver_status.upper()}</span>",
-                unsafe_allow_html=True
-            )
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # ── Summary KPIs ───────────────────────────────────────────────────
-            st.markdown("### 📊 Joint Optimization Summary")
-            jk1, jk2, jk3, jk4, jk5 = st.columns(5)
-            jk1.metric("Products",      summary.get("total_products", len(analysis)))
-            jk2.metric("Total Demand",  f"{summary.get('total_demand', 0):,}")
-            jk3.metric("Total Batches", summary.get("total_batches", 0))
-            jk4.metric("Makespan Proxy", f"{j_preview.get('makespan_proxy', 0):.1f}h",
-                        help="Max machine load hours — lower = more balanced")
-            jk5.metric("Avg Improvement", f"{summary.get('avg_improvement', 0):.1f}%")
-
-            # ── Machine load chart — the KEY chart ─────────────────────────────
-            if machine_loads:
-                st.markdown("### 🏭 Machine Load Balance After Joint Optimization")
-
-                ml_df = (
-                    pd.DataFrame(list(machine_loads.items()), columns=["Machine", "Load (h)"])
-                    .sort_values("Load (h)", ascending=False)
-                )
-                max_load = ml_df["Load (h)"].max()
-                min_load = ml_df["Load (h)"].min()
-
-                bar_colors = [
-                    "#ef4444" if v == max_load else
-                    "#22c55e" if v == min_load else "#4facfe"
-                    for v in ml_df["Load (h)"]
-                ]
-
-                ml_fig = go.Figure()
-                ml_fig.add_trace(go.Bar(
-                    x=ml_df["Machine"], y=ml_df["Load (h)"],
-                    marker_color=bar_colors,
-                    text=[f"{v:.1f}h" for v in ml_df["Load (h)"]],
-                    textposition="auto",
-                    hovertemplate="<b>%{x}</b><br>Load: %{y:.2f}h<extra></extra>",
-                ))
-                # Makespan proxy reference line
-                proxy = j_preview.get("makespan_proxy", 0)
-                if proxy > 0:
-                    ml_fig.add_hline(
-                        y=proxy, line_dash="dash", line_color="#f59e0b",
-                        annotation_text=f"Makespan proxy C={proxy:.1f}h",
-                        annotation_position="top right"
-                    )
-
-                ml_fig.update_layout(
-                    template="plotly_dark", height=400,
-                    title="Machine Load Hours (joint optimization result)",
-                    xaxis_title="Machine", yaxis_title="Load (hours)",
-                    margin=dict(b=100),
-                )
-                ml_fig.update_xaxes(tickangle=30)
-                st.plotly_chart(ml_fig, use_container_width=True)
-
-                # Load balance score
-                if max_load > 0:
-                    balance_pct = (1 - (max_load - min_load) / max_load) * 100
-                    st.markdown(f"""
-                    <div style='background:#0d1a0d;border:1px solid #1a3a1a;border-radius:6px;
-                                padding:10px 16px;margin:8px 0;font-size:13px;color:#9ca3af;'>
-                    <b style='color:#38ef7d'>Load Balance Score: {balance_pct:.1f}%</b>
-                    &nbsp; (100% = perfectly balanced, 0% = all load on one machine)<br>
-                    Bottleneck: <b style='color:#ef4444'>{ml_df.iloc[0]["Machine"]}</b>
-                    &nbsp;({ml_df.iloc[0]["Load (h)"]:.1f}h) &nbsp;|&nbsp;
-                    Most idle: <b style='color:#22c55e'>{ml_df.iloc[-1]["Machine"]}</b>
-                    &nbsp;({ml_df.iloc[-1]["Load (h)"]:.1f}h)
-                    </div>
-                    """, unsafe_allow_html=True)
-
-            # ── Per-product results ────────────────────────────────────────────
-            if analysis:
-                df_j = pd.DataFrame(analysis)
-                if "improvement" in df_j.columns:
-                    df_j["improvement_pct"] = (
-                        df_j["improvement"]
-                        .str.replace("%", "", regex=False)
-                        .astype(float)
-                    )
-
-                jt1, jt2, jt3 = st.tabs([
-                    "📋 Product Results", "📈 Comparison Charts", "🔍 Source Breakdown"
-                ])
-
-                with jt1:
-                    st.markdown("#### Per-Product Joint Optimization Results")
-
-                    def _color_j(val):
-                        try:
-                            v = float(str(val).replace("%", ""))
-                            if v > 30: return "background:#14532d;color:#86efac"
-                            if v > 10: return "background:#1a3a0a;color:#bef264"
-                            if v > 0:  return "background:#1a2a0a;color:#d9f99d"
-                        except Exception:
-                            pass
-                        return ""
-
-                    display_j = df_j[[
-                        "item", "description", "demand",
-                        "old_batch_size", "old_num_batches",
-                        "new_batch_size", "new_num_batches",
-                        "ideal_batch_size", "improvement",
-                        "source",
-                    ]].copy()
-                    st.dataframe(
-                        display_j.style.applymap(_color_j, subset=["improvement"]),
-                        use_container_width=True, height=480
-                    )
-                    st.download_button("📥 Download CSV",
-                                       data=display_j.to_csv(index=False),
-                                       file_name="joint_batch_results.csv", mime="text/csv")
-
-                with jt2:
-                    df_top20j = df_j.nlargest(20, "demand")
-
-                    # Side-by-side batch count comparison
-                    fc1, fc2 = st.columns(2)
-                    with fc1:
-                        fig_jbc = go.Figure()
-                        fig_jbc.add_trace(go.Bar(name="Old", x=df_top20j["item"].astype(str),
-                                                  y=df_top20j["old_num_batches"],
-                                                  marker_color="#4facfe"))
-                        fig_jbc.add_trace(go.Bar(name="Joint ILP", x=df_top20j["item"].astype(str),
-                                                  y=df_top20j["new_num_batches"],
-                                                  marker_color="#38ef7d"))
-                        fig_jbc.update_layout(barmode="group", template="plotly_dark",
-                                               height=320, title="Batch Count (top 20)",
-                                               legend=dict(orientation="h", y=1.1))
-                        st.plotly_chart(fig_jbc, use_container_width=True)
-
-                    with fc2:
-                        fig_jbs = go.Figure()
-                        fig_jbs.add_trace(go.Scatter(name="Old", x=df_top20j["item"].astype(str),
-                                                      y=df_top20j["old_batch_size"],
-                                                      mode="lines+markers",
-                                                      line=dict(color="#f59e0b")))
-                        fig_jbs.add_trace(go.Scatter(name="Joint ILP", x=df_top20j["item"].astype(str),
-                                                      y=df_top20j["new_batch_size"],
-                                                      mode="lines+markers",
-                                                      line=dict(color="#38ef7d")))
-                        fig_jbs.update_layout(template="plotly_dark", height=320,
-                                               title="Batch Size (top 20)",
-                                               legend=dict(orientation="h", y=1.1))
-                        st.plotly_chart(fig_jbs, use_container_width=True)
-
-                    # Improvement histogram
-                    if "improvement_pct" in df_j.columns:
-                        fig_jimp = px.histogram(
-                            df_j, x="improvement_pct", nbins=20,
-                            color_discrete_sequence=["#38ef7d"],
-                            template="plotly_dark",
-                            title="Joint Improvement Distribution (%)",
-                            labels={"improvement_pct": "Batch Reduction (%)"}
-                        )
-                        fig_jimp.update_layout(height=280)
-                        st.plotly_chart(fig_jimp, use_container_width=True)
-
-                with jt3:
-                    if "source" in df_j.columns:
-                        src_counts = df_j["source"].value_counts().reset_index()
-                        src_counts.columns = ["Source", "Count"]
-
-                        color_map = {
-                            "joint_ilp": "#38ef7d",
-                            "fallback":  "#f59e0b",
-                            "skipped":   "#6b7280",
-                        }
-                        fig_src = px.pie(
-                            src_counts, values="Count", names="Source",
-                            color="Source", color_discrete_map=color_map,
-                            template="plotly_dark",
-                            title="Decision Source: How was each product's batch size chosen?"
-                        )
-                        fig_src.update_layout(height=320)
-                        st.plotly_chart(fig_src, use_container_width=True)
-
-                        st.markdown("""
-                        | Source | Meaning |
-                        |--------|---------|
-                        | `joint_ilp` | Solved optimally by the joint MILP |
-                        | `fallback` | ILP couldn't find optimal; used heuristic |
-                        | `skipped` | Zero demand — not included in optimization |
-                        """)
-
-            # ── Machine load CSV download ──────────────────────────────────────
-            if machine_loads:
-                ml_csv = pd.DataFrame(
-                    list(machine_loads.items()), columns=["machine", "load_hours"]
-                ).sort_values("load_hours", ascending=False)
-                st.download_button("📥 Download Machine Loads CSV",
-                                   data=ml_csv.to_csv(index=False),
-                                   file_name="joint_machine_loads.csv", mime="text/csv")
+# elif page == "📦 Batch Optimization":
+#     st.title("📦 Batch Size Optimization")
+
+#     # ── Info banner ────────────────────────────────────────────────────────────
+#     st.markdown("""
+#     <div style='background:#1a2a3a;border-left:4px solid #4facfe;
+#                 padding:14px 18px;border-radius:6px;margin-bottom:18px;'>
+#     <b style='color:#4facfe'>ℹ️ Two Optimization Modes</b><br>
+#     <span style='color:#ccc'>
+#     <b style='color:#00f2fe'>Individual ILP</b> — optimises each product independently,
+#     minimising the number of batches subject to size constraints.<br>
+#     <b style='color:#38ef7d'>Joint ILP (new)</b> — optimises ALL products simultaneously,
+#     minimising the <i>worst machine load</i> (makespan proxy) to balance utilisation
+#     across all machines and avoid bottlenecks.
+#     </span></div>
+#     """, unsafe_allow_html=True)
+
+#     # ── Adaptive bounds explanation (the bug fix) ──────────────────────────────
+#     with st.expander("⚠️ Why min/max batch size is applied adaptively (important)", expanded=False):
+#         st.markdown("""
+# **Problem with fixed global bounds:**
+
+# Your products span a very wide demand range — from **100 units** to **319,908 units**.
+# A fixed `min_batch=50, max_batch=500` causes two failure modes:
+
+# | Demand | Issue | What happened before fix |
+# |--------|-------|--------------------------|
+# | 121 | `max_batch=500 > demand=121` → ILP was forced to pick batch=500 for 1 batch, ignoring that only 121 units are needed | `new_batch_size=500, new_num_batches=1` ❌ |
+# | 319,908 | `ceil(319908/n) > 500` for **every** n ∈ [1..25] → ILP had no feasible solution at all | Fell back to naive heuristic ❌ |
+
+# **The fix — adaptive bounds per product:**
+# ```
+# true_min = ceil(demand / max_num_batches)   # smallest batch using all slots
+# true_max = demand                            # one big batch (N=1)
+
+# effective_min = max(user_min, true_min)
+# effective_max = min(user_max, true_max)
+
+# if effective_min > effective_max:            # user bounds incompatible with demand
+#     use (true_min, true_max) instead
+# ```
+# Your `min_batch_size` and `max_batch_size` parameters are now treated as **preferences**.
+# The ILP clamps them to what is actually achievable for each product's demand level.
+#         """)
+
+#     st.markdown("---")
+
+#     # ── Parameters ─────────────────────────────────────────────────────────────
+#     st.markdown("### ⚙️ Optimization Parameters")
+#     bp1, bp2, bp3, bp4 = st.columns(4)
+#     with bp1:
+#         max_num_batches = st.number_input(
+#             "Max number of batches", min_value=1, max_value=100, value=25,
+#             help="Upper bound for N in the ILP"
+#         )
+#     with bp2:
+#         min_batch_size = st.number_input(
+#             "Min batch size (preferred)", min_value=1, max_value=100000, value=50,
+#             help="Preferred minimum units per batch. Applied where feasible for the product's demand."
+#         )
+#     with bp3:
+#         max_batch_size = st.number_input(
+#             "Max batch size (preferred)", min_value=1, max_value=1000000, value=500,
+#             help="Preferred maximum units per batch. Clamped to demand when demand < this value."
+#         )
+#     with bp4:
+#         batch_async = st.checkbox(
+#             "Run async (Celery)", value=False,
+#             help="Use background task for large product catalogs"
+#         )
+
+#     params = {
+#         "max_num_batches": int(max_num_batches),
+#         "min_batch_size":  int(min_batch_size),
+#         "max_batch_size":  int(max_batch_size),
+#     }
+
+#     st.markdown("---")
+
+#     # ── Page tabs ──────────────────────────────────────────────────────────────
+#     tab_indiv, tab_joint = st.tabs([
+#         "🔢 Individual Optimization",
+#         "🤝 Joint Optimization (balance machine loads)",
+#     ])
+
+#     # ==========================================================================
+#     # TAB 1 — Individual ILP (existing, with adaptive bounds fix)
+#     # ==========================================================================
+#     with tab_indiv:
+#         st.markdown("""
+#         <div style='background:#0d1a2d;border-left:3px solid #4facfe;
+#                     padding:8px 14px;border-radius:4px;font-size:12px;
+#                     color:#93c5fd;margin-bottom:14px;'>
+#         Optimises each product independently. Objective: minimise number of batches N
+#         while keeping batch size within adaptive bounds. Fast — runs product-by-product.
+#         </div>
+#         """, unsafe_allow_html=True)
+
+#         ia1, ia2 = st.columns(2)
+#         with ia1:
+#             indiv_preview = st.button(
+#                 "🔍 Preview (no DB write)",
+#                 type="primary", use_container_width=True
+#             )
+#         with ia2:
+#             indiv_save = st.button(
+#                 "💾 Save to Database",
+#                 type="secondary", use_container_width=True
+#             )
+
+#         # ── Preview ───────────────────────────────────────────────────────────
+#         if indiv_preview:
+#             _params_async = {**params, "async_mode": "true" if batch_async else "false"}
+#             if batch_async:
+#                 with st.spinner("Submitting preview task…"):
+#                     try:
+#                         r = requests.get(
+#                             f"{API_BASE_URL}/batch-optimization-preview/",
+#                             params=_params_async, headers=get_auth_headers(), timeout=30
+#                         )
+#                         if r.status_code == 202:
+#                             st.session_state.batch_preview_task_id = r.json().get("task_id")
+#                             st.session_state.batch_preview_result  = None
+#                             st.success(f"Task submitted: `{st.session_state.batch_preview_task_id}`")
+#                         else:
+#                             st.error(f"Error {r.status_code}: {r.text}")
+#                     except Exception as e:
+#                         st.error(f"Connection error: {e}")
+#             else:
+#                 with st.spinner("Running ILP for all products…"):
+#                     try:
+#                         r = requests.get(
+#                             f"{API_BASE_URL}/batch-optimization-preview/",
+#                             params=params, headers=get_auth_headers(), timeout=300
+#                         )
+#                         if r.status_code == 200:
+#                             st.session_state.batch_preview_result  = r.json()
+#                             st.session_state.batch_preview_task_id = None
+#                             st.success("✅ Preview complete!")
+#                         else:
+#                             st.error(f"Error {r.status_code}: {r.text}")
+#                     except Exception as e:
+#                         st.error(f"Connection error: {e}")
+
+#         btask = st.session_state.get("batch_preview_task_id")
+#         if btask:
+#             st.markdown("#### ⏳ Preview Task")
+#             pb  = st.progress(0)
+#             txt = st.empty()
+#             res = poll_task_until_complete(btask, pb, txt, max_wait_seconds=600)
+#             if res:
+#                 st.session_state.batch_preview_result  = res
+#                 st.session_state.batch_preview_task_id = None
+#                 st.rerun()
+
+#         # ── Save ──────────────────────────────────────────────────────────────
+#         if indiv_save:
+#             if batch_async:
+#                 with st.spinner("Submitting save task…"):
+#                     try:
+#                         r = requests.post(
+#                             f"{API_BASE_URL}/batch-optimization-save/",
+#                             json={**params, "async_mode": "true"},
+#                             headers=get_auth_headers(), timeout=30
+#                         )
+#                         if r.status_code == 202:
+#                             st.session_state.batch_save_task_id = r.json().get("task_id")
+#                             st.session_state.batch_save_result  = None
+#                             st.success(f"Save task: `{st.session_state.batch_save_task_id}`")
+#                         else:
+#                             st.error(f"Error {r.status_code}: {r.text}")
+#                     except Exception as e:
+#                         st.error(f"Connection error: {e}")
+#             else:
+#                 with st.spinner("Applying to database…"):
+#                     try:
+#                         r = requests.post(
+#                             f"{API_BASE_URL}/batch-optimization-save/",
+#                             json=params, headers=get_auth_headers(), timeout=300
+#                         )
+#                         if r.status_code == 200:
+#                             st.session_state.batch_save_result  = r.json()
+#                             st.session_state.batch_save_task_id = None
+#                             st.success("✅ Saved!")
+#                         else:
+#                             st.error(f"Error {r.status_code}: {r.text}")
+#                     except Exception as e:
+#                         st.error(f"Connection error: {e}")
+
+#         stask = st.session_state.get("batch_save_task_id")
+#         if stask:
+#             st.markdown("#### ⏳ Save Task")
+#             pb2  = st.progress(0)
+#             txt2 = st.empty()
+#             res2 = poll_task_until_complete(stask, pb2, txt2, max_wait_seconds=600)
+#             if res2:
+#                 st.session_state.batch_save_result  = res2
+#                 st.session_state.batch_save_task_id = None
+#                 st.rerun()
+
+#         # ── Save result banner ────────────────────────────────────────────────
+#         save_result = st.session_state.get("batch_save_result")
+#         if isinstance(save_result, dict) and save_result.get("status") != "error":
+#             upd  = save_result.get("total_updated", 0)
+#             skip = save_result.get("total_skipped", 0)
+#             st.markdown(f"""
+#             <div style='background:#0a2a0a;border-left:4px solid #22c55e;
+#                         padding:14px 18px;border-radius:6px;margin:12px 0;'>
+#             <b style='color:#22c55e'>✅ Database Updated</b><br>
+#             <span style='color:#ccc'>
+#             <b style='color:#86efac'>{upd}</b> products updated &nbsp;|&nbsp;
+#             <b style='color:#fca5a5'>{skip}</b> skipped
+#             </span></div>
+#             """, unsafe_allow_html=True)
+#             updated_list = save_result.get("updated_products", [])
+#             if updated_list:
+#                 with st.expander(f"📋 {len(updated_list)} updated products"):
+#                     df_upd = pd.DataFrame(updated_list)
+#                     df_upd["Batch Size Δ"]   = df_upd["new_batch_size"]  - df_upd["old_batch_size"]
+#                     df_upd["Num Batches Δ"]  = df_upd["new_num_batches"] - df_upd["old_num_batches"]
+#                     st.dataframe(df_upd, use_container_width=True, height=300)
+#                     st.download_button("📥 CSV", data=df_upd.to_csv(index=False),
+#                                        file_name="indiv_batch_updates.csv", mime="text/csv")
+
+#         # ── Preview results ───────────────────────────────────────────────────
+#         preview = st.session_state.get("batch_preview_result")
+#         if not preview:
+#             st.info("Click **🔍 Preview** to run the individual ILP and see results.")
+#         else:
+#             summary  = preview.get("summary", {})
+#             analysis = preview.get("batch_analysis", [])
+
+#             st.markdown("---")
+#             st.markdown("### 📊 Individual Optimization Results")
+
+#             sm1, sm2, sm3, sm4, sm5 = st.columns(5)
+#             sm1.metric("Products",       summary.get("total_products", 0))
+#             sm2.metric("Total Demand",   f"{summary.get('total_demand', 0):,}")
+#             sm3.metric("Total Batches",  summary.get("total_batches", 0))
+#             sm4.metric("Avg Batch Size", summary.get("avg_batch_size", 0))
+#             sm5.metric("Std Dev",        summary.get("std_batch_size", 0))
+
+#             # Adaptive bounds note
+#             if summary.get("note"):
+#                 st.info(f"ℹ️ {summary['note']}")
+
+#             if analysis:
+#                 df_a = pd.DataFrame(analysis)
+#                 df_a["improvement_pct"] = (
+#                     df_a["improvement"]
+#                     .str.replace("%", "", regex=False)
+#                     .astype(float)
+#                 )
+#                 df_a["batch_reduction"]   = df_a["old_num_batches"] - df_a["new_num_batches"]
+#                 df_a["batch_size_change"] = df_a["new_batch_size"]  - df_a["old_batch_size"]
+
+#                 ptab1, ptab2, ptab3, ptab4 = st.tabs([
+#                     "📈 Charts", "📋 Full Table", "🏆 Top Improvements", "🔬 ILP Detail"
+#                 ])
+
+#                 with ptab1:
+#                     df_top20 = df_a.nlargest(20, "demand")
+
+#                     st.markdown("#### Batch Count: Old (12) vs New — top 20 by demand")
+#                     fig_bc = go.Figure()
+#                     fig_bc.add_trace(go.Bar(name="Old (12)", x=df_top20["item"].astype(str),
+#                                             y=df_top20["old_num_batches"], marker_color="#4facfe"))
+#                     fig_bc.add_trace(go.Bar(name="New (ILP)", x=df_top20["item"].astype(str),
+#                                             y=df_top20["new_num_batches"], marker_color="#00f2fe"))
+#                     fig_bc.update_layout(barmode="group", template="plotly_dark", height=380,
+#                                           xaxis_title="Item", yaxis_title="# Batches",
+#                                           legend=dict(orientation="h", y=1.1))
+#                     st.plotly_chart(fig_bc, use_container_width=True)
+
+#                     st.markdown("#### Batch Size: Old vs New vs Ideal")
+#                     fig_bs = go.Figure()
+#                     fig_bs.add_trace(go.Scatter(name="Old", x=df_top20["item"].astype(str),
+#                                                 y=df_top20["old_batch_size"],
+#                                                 mode="lines+markers", line=dict(color="#f59e0b")))
+#                     fig_bs.add_trace(go.Scatter(name="New", x=df_top20["item"].astype(str),
+#                                                 y=df_top20["new_batch_size"],
+#                                                 mode="lines+markers", line=dict(color="#22c55e")))
+#                     fig_bs.add_trace(go.Scatter(name="Ideal", x=df_top20["item"].astype(str),
+#                                                 y=df_top20["ideal_batch_size"],
+#                                                 mode="lines", line=dict(color="#a78bfa", dash="dot")))
+#                     fig_bs.update_layout(template="plotly_dark", height=360,
+#                                           xaxis_title="Item", yaxis_title="Batch Size",
+#                                           legend=dict(orientation="h", y=1.1))
+#                     st.plotly_chart(fig_bs, use_container_width=True)
+
+#                     # Effective bounds annotation
+#                     if "effective_min_batch" in df_a.columns:
+#                         st.markdown("#### Adaptive Bounds Applied")
+#                         bounds_fig = go.Figure()
+#                         bounds_fig.add_trace(go.Bar(
+#                             name="Eff. Min Batch", x=df_a["item"].astype(str),
+#                             y=df_a["effective_min_batch"], marker_color="rgba(239,68,68,0.5)"
+#                         ))
+#                         bounds_fig.add_trace(go.Bar(
+#                             name="New Batch Size", x=df_a["item"].astype(str),
+#                             y=df_a["new_batch_size"], marker_color="#22c55e"
+#                         ))
+#                         bounds_fig.add_trace(go.Bar(
+#                             name="Eff. Max Batch", x=df_a["item"].astype(str),
+#                             y=df_a["effective_max_batch"], marker_color="rgba(59,130,246,0.4)"
+#                         ))
+#                         bounds_fig.update_layout(
+#                             barmode="overlay", template="plotly_dark", height=340,
+#                             title="Adaptive Bounds vs Chosen Batch Size (each product)",
+#                             xaxis_title="Item", yaxis_title="Units",
+#                             legend=dict(orientation="h", y=1.1),
+#                         )
+#                         st.plotly_chart(bounds_fig, use_container_width=True)
+
+#                     c_l, c_r = st.columns(2)
+#                     with c_l:
+#                         fig_hist = px.histogram(df_a, x="improvement_pct", nbins=20,
+#                                                  color_discrete_sequence=["#4facfe"],
+#                                                  template="plotly_dark",
+#                                                  title="Improvement Distribution (%)")
+#                         fig_hist.update_layout(height=280)
+#                         st.plotly_chart(fig_hist, use_container_width=True)
+#                     with c_r:
+#                         fig_sc = px.scatter(df_a, x="demand", y="batch_reduction",
+#                                              color="improvement_pct",
+#                                              color_continuous_scale="Viridis",
+#                                              template="plotly_dark",
+#                                              hover_data=["item", "new_batch_size"],
+#                                              title="Demand vs Batch Reduction")
+#                         fig_sc.update_layout(height=280)
+#                         st.plotly_chart(fig_sc, use_container_width=True)
+
+#                 with ptab2:
+#                     display_cols = [
+#                         "item", "description", "demand",
+#                         "old_batch_size", "old_num_batches",
+#                         "new_batch_size", "new_num_batches",
+#                         "ideal_batch_size", "improvement",
+#                         "batch_reduction", "batch_size_change",
+#                     ]
+#                     if "effective_min_batch" in df_a.columns:
+#                         display_cols += ["effective_min_batch", "effective_max_batch"]
+
+#                     df_display = df_a[display_cols].copy()
+
+#                     def _color_impr(val):
+#                         try:
+#                             v = float(str(val).replace("%", ""))
+#                             if v > 30: return "background:#14532d;color:#86efac"
+#                             if v > 10: return "background:#1a3a0a;color:#bef264"
+#                             if v > 0:  return "background:#1a2a0a;color:#d9f99d"
+#                         except Exception:
+#                             pass
+#                         return ""
+
+#                     st.dataframe(
+#                         df_display.style.applymap(_color_impr, subset=["improvement"]),
+#                         use_container_width=True, height=500
+#                     )
+#                     st.download_button("📥 Download CSV",
+#                                        data=df_display.to_csv(index=False),
+#                                        file_name="indiv_preview.csv", mime="text/csv")
+
+#                 with ptab3:
+#                     df_top10 = df_a.nlargest(10, "improvement_pct")
+#                     for _, row in df_top10.iterrows():
+#                         impr  = row["improvement_pct"]
+#                         color = "#22c55e" if impr > 30 else "#f59e0b" if impr > 10 else "#6b7280"
+#                         st.markdown(f"""
+#                         <div style='background:#0d1a0d;border-left:4px solid {color};
+#                                     border-radius:6px;padding:10px 16px;margin-bottom:8px;
+#                                     display:flex;justify-content:space-between;'>
+#                           <div>
+#                             <b style='color:#d1d5db'>Item {int(row["item"])}</b>
+#                             <span style='color:#6b7280;font-size:12px;margin-left:8px;'>
+#                               {str(row["description"])[:45]}
+#                             </span><br>
+#                             <span style='color:#9ca3af;font-size:11px;'>
+#                               Demand: {int(row["demand"]):,}
+#                             </span>
+#                           </div>
+#                           <div style='text-align:right;'>
+#                             <b style='color:{color};font-size:16px;'>{impr:.1f}%</b><br>
+#                             <span style='color:#9ca3af;font-size:11px;'>
+#                               {int(row["old_num_batches"])}→{int(row["new_num_batches"])} batches &nbsp;|&nbsp;
+#                               {int(row["old_batch_size"])}→{int(row["new_batch_size"])} units/batch
+#                             </span>
+#                           </div>
+#                         </div>
+#                         """, unsafe_allow_html=True)
+
+#                     df_zero = df_a[df_a["improvement_pct"] == 0]
+#                     if not df_zero.empty:
+#                         st.markdown(f"#### ⚪ {len(df_zero)} products unchanged")
+#                         st.dataframe(df_zero[["item", "description", "demand",
+#                                               "old_batch_size", "new_batch_size"]],
+#                                      use_container_width=True, height=200)
+
+#                 with ptab4:
+#                     st.markdown("#### ILP Formulation")
+#                     st.json({
+#                         "solver": "PuLP (CBC)",
+#                         "objective": "Minimize N (number of batches per product)",
+#                         "adaptive_bounds": {
+#                             "effective_min": "max(user_min, ceil(demand/max_num_batches))",
+#                             "effective_max": "min(user_max, demand)",
+#                             "fallback": "use (ceil(demand/max_N), demand) if intersection empty"
+#                         },
+#                         "variables": {
+#                             "B": "batch_size ∈ [eff_min, eff_max] integer",
+#                             "N": f"num_batches ∈ [1, {int(max_num_batches)}] integer",
+#                             "y_n": f"binary selector n ∈ [1..{int(max_num_batches)}]"
+#                         },
+#                         "key_constraints": [
+#                             "sum(y_n) == 1",
+#                             "N == sum(n*y_n)",
+#                             "B >= ceil(demand/n) - M*(1-y_n)  ∀n",
+#                             "y_n == 0 if ceil(demand/n) > eff_max"
+#                         ],
+#                         "parameters_used": params
+#                     })
+
+#     # ==========================================================================
+#     # TAB 2 — Joint Multi-Product ILP (NEW)
+#     # ==========================================================================
+#     with tab_joint:
+#         st.markdown("""
+#         <div style='background:#0d200d;border-left:3px solid #38ef7d;
+#                     padding:8px 14px;border-radius:4px;font-size:12px;
+#                     color:#86efac;margin-bottom:14px;'>
+#         Optimises ALL products simultaneously in a single MILP.
+#         Objective: <b>minimise C</b> (the worst machine load hours — the bottleneck).
+#         Machine-load constraints link batch decisions across products,
+#         producing a balanced schedule rather than per-product greedy choices.
+#         </div>
+#         """, unsafe_allow_html=True)
+
+#         # ── Why joint matters visual ───────────────────────────────────────────
+#         with st.expander("📖 Why Joint Optimization? (visual explanation)", expanded=False):
+#             st.markdown("""
+# **Before (Individual, independent optimization):**
+# ```
+# Machine 1: ████████████████████████ 95%  ← BOTTLENECK
+# Machine 2: ████                      20%  ← IDLE
+# Machine 3: ██████                    30%
+# ```
+# Each product's ILP ignores other products' machine use.
+# Product A and B both independently decide to use Machine 1 heavily.
+
+# **After (Joint optimization):**
+# ```
+# Machine 1: ██████████████  65%
+# Machine 2: █████████████   60%
+# Machine 3: ████████████    55%
+# ```
+# The joint MILP sees all machine constraints at once. It shifts some products
+# to use different batch counts so no single machine becomes overloaded.
+
+# **Result:** Lower makespan → faster total production → better schedule quality.
+
+# **MILP Formulation:**
+# ```
+# Minimize  C                                    ← worst machine load (hours)
+
+# For each product i:
+#   Σ_n  y_{i,n}  =  1                          ← exactly one batch count chosen
+#   y_{i,n}  ∈  {0,1}
+
+# For each machine m:
+#   Σ_{i,n}  load_{i,m,n} × y_{i,n}  ≤  C      ← all machine loads ≤ C
+
+# where  load_{i,m,n}  =  cycle_time_{i,m} × ceil(demand_i/n) × n  /  3600
+# ```
+#             """)
+
+#         # ── Solver time limit control ──────────────────────────────────────────
+#         jt1, jt2 = st.columns(2)
+#         with jt1:
+#             time_limit = st.number_input(
+#                 "Solver time limit (seconds)", min_value=10,
+#                 max_value=600, value=120,
+#                 help="CBC will stop and return best solution found within this time"
+#             )
+#         with jt2:
+#             st.markdown("<br>", unsafe_allow_html=True)
+#             st.info(
+#                 f"Joint ILP size: ~{int(max_num_batches)} × products binary vars. "
+#                 "For 39 products this is ~975 binaries — typically solved in <30s."
+#             )
+
+#         ja1, ja2 = st.columns(2)
+#         with ja1:
+#             joint_preview_btn = st.button(
+#                 "🔍 Joint Preview (no DB write)",
+#                 type="primary", use_container_width=True
+#             )
+#         with ja2:
+#             joint_save_btn = st.button(
+#                 "💾 Joint Save to Database",
+#                 type="secondary", use_container_width=True
+#             )
+
+#         # ── Joint Preview ──────────────────────────────────────────────────────
+#         if joint_preview_btn:
+#             if batch_async:
+#                 with st.spinner("Submitting joint preview task…"):
+#                     try:
+#                         r = requests.get(
+#                             f"{API_BASE_URL}/batch-optimization-joint-preview/",
+#                             params={**params, "async_mode": "true"},
+#                             headers=get_auth_headers(), timeout=30
+#                         )
+#                         if r.status_code == 202:
+#                             st.session_state.joint_preview_task_id = r.json().get("task_id")
+#                             st.session_state.joint_preview_result  = None
+#                             st.success(f"Task: `{st.session_state.joint_preview_task_id}`")
+#                         else:
+#                             st.error(f"Error {r.status_code}: {r.text}")
+#                     except Exception as e:
+#                         st.error(f"Connection error: {e}")
+#             else:
+#                 with st.spinner(f"Running joint MILP (up to {time_limit}s)…"):
+#                     try:
+#                         r = requests.get(
+#                             f"{API_BASE_URL}/batch-optimization-joint-preview/",
+#                             params=params, headers=get_auth_headers(),
+#                             timeout=time_limit + 60
+#                         )
+#                         if r.status_code == 200:
+#                             st.session_state.joint_preview_result  = r.json()
+#                             st.session_state.joint_preview_task_id = None
+#                             st.success("✅ Joint preview complete!")
+#                         else:
+#                             st.error(f"Error {r.status_code}: {r.text}")
+#                     except Exception as e:
+#                         st.error(f"Connection error: {e}")
+
+#         jptask = st.session_state.get("joint_preview_task_id")
+#         if jptask:
+#             st.markdown("#### ⏳ Joint Preview Task")
+#             jpb  = st.progress(0)
+#             jtxt = st.empty()
+#             jres = poll_task_until_complete(jptask, jpb, jtxt, max_wait_seconds=600)
+#             if jres:
+#                 st.session_state.joint_preview_result  = jres
+#                 st.session_state.joint_preview_task_id = None
+#                 st.rerun()
+
+#         # ── Joint Save ─────────────────────────────────────────────────────────
+#         if joint_save_btn:
+#             if batch_async:
+#                 with st.spinner("Submitting joint save task…"):
+#                     try:
+#                         r = requests.post(
+#                             f"{API_BASE_URL}/batch-optimization-joint/",
+#                             json={**params, "async_mode": "true"},
+#                             headers=get_auth_headers(), timeout=30
+#                         )
+#                         if r.status_code == 202:
+#                             st.session_state.joint_save_task_id = r.json().get("task_id")
+#                             st.session_state.joint_save_result  = None
+#                             st.success(f"Task: `{st.session_state.joint_save_task_id}`")
+#                         else:
+#                             st.error(f"Error {r.status_code}: {r.text}")
+#                     except Exception as e:
+#                         st.error(f"Connection error: {e}")
+#             else:
+#                 with st.spinner(f"Running joint MILP and saving (up to {time_limit}s)…"):
+#                     try:
+#                         r = requests.post(
+#                             f"{API_BASE_URL}/batch-optimization-joint/",
+#                             json=params, headers=get_auth_headers(),
+#                             timeout=time_limit + 60
+#                         )
+#                         if r.status_code == 200:
+#                             st.session_state.joint_save_result  = r.json()
+#                             st.session_state.joint_save_task_id = None
+#                             st.success("✅ Joint optimization saved to database!")
+#                         else:
+#                             st.error(f"Error {r.status_code}: {r.text}")
+#                     except Exception as e:
+#                         st.error(f"Connection error: {e}")
+
+#         jstask = st.session_state.get("joint_save_task_id")
+#         if jstask:
+#             st.markdown("#### ⏳ Joint Save Task")
+#             jsb  = st.progress(0)
+#             jst  = st.empty()
+#             jsr  = poll_task_until_complete(jstask, jsb, jst, max_wait_seconds=600)
+#             if jsr:
+#                 st.session_state.joint_save_result  = jsr
+#                 st.session_state.joint_save_task_id = None
+#                 st.rerun()
+
+#         # ── Joint Save result banner ───────────────────────────────────────────
+#         j_save = st.session_state.get("joint_save_result")
+#         if isinstance(j_save, dict) and j_save.get("status") != "error":
+#             upd = j_save.get("products_updated", 0)
+#             st.markdown(f"""
+#             <div style='background:#0a2a0a;border-left:4px solid #22c55e;
+#                         padding:14px 18px;border-radius:6px;margin:12px 0;'>
+#             <b style='color:#22c55e'>✅ Joint Optimization Applied to Database</b><br>
+#             <span style='color:#ccc'>
+#             <b style='color:#86efac'>{upd}</b> products updated &nbsp;|&nbsp;
+#             Makespan proxy: <b style='color:#38ef7d'>{j_save.get("makespan_proxy", 0):.1f}h</b> &nbsp;|&nbsp;
+#             Solver: <b>{j_save.get("status", "—")}</b>
+#             </span></div>
+#             """, unsafe_allow_html=True)
+
+#         # ── Joint results display ──────────────────────────────────────────────
+#         j_preview = (
+#             st.session_state.get("joint_preview_result") or
+#             st.session_state.get("joint_save_result")
+#         )
+
+#         if not j_preview:
+#             st.markdown("""
+#             <div style='text-align:center;padding:50px 20px;color:#4b5563;'>
+#               <div style='font-size:52px;'>🤝</div>
+#               <div style='font-size:15px;font-weight:600;color:#6b7280;margin:10px 0;'>
+#                 No joint optimization loaded yet
+#               </div>
+#               <div style='font-size:12px;'>
+#                 Click <b>🔍 Joint Preview</b> to run the multi-product MILP
+#               </div>
+#             </div>
+#             """, unsafe_allow_html=True)
+#         else:
+#             analysis      = j_preview.get("batch_analysis", [])
+#             machine_loads = j_preview.get("machine_loads", {})
+#             summary       = j_preview.get("summary", {})
+#             solver_status = j_preview.get("status", "unknown")
+
+#             st.markdown("---")
+
+#             # Solver status badge
+#             badge_color = "#22c55e" if solver_status == "optimal" else "#f59e0b"
+#             st.markdown(
+#                 f"<span style='background:{badge_color};color:#000;padding:4px 12px;"
+#                 f"border-radius:12px;font-size:12px;font-weight:700;'>"
+#                 f"Solver: {solver_status.upper()}</span>",
+#                 unsafe_allow_html=True
+#             )
+#             st.markdown("<br>", unsafe_allow_html=True)
+
+#             # ── Summary KPIs ───────────────────────────────────────────────────
+#             st.markdown("### 📊 Joint Optimization Summary")
+#             jk1, jk2, jk3, jk4, jk5 = st.columns(5)
+#             jk1.metric("Products",      summary.get("total_products", len(analysis)))
+#             jk2.metric("Total Demand",  f"{summary.get('total_demand', 0):,}")
+#             jk3.metric("Total Batches", summary.get("total_batches", 0))
+#             jk4.metric("Makespan Proxy", f"{j_preview.get('makespan_proxy', 0):.1f}h",
+#                         help="Max machine load hours — lower = more balanced")
+#             jk5.metric("Avg Improvement", f"{summary.get('avg_improvement', 0):.1f}%")
+
+#             # ── Machine load chart — the KEY chart ─────────────────────────────
+#             if machine_loads:
+#                 st.markdown("### 🏭 Machine Load Balance After Joint Optimization")
+
+#                 ml_df = (
+#                     pd.DataFrame(list(machine_loads.items()), columns=["Machine", "Load (h)"])
+#                     .sort_values("Load (h)", ascending=False)
+#                 )
+#                 max_load = ml_df["Load (h)"].max()
+#                 min_load = ml_df["Load (h)"].min()
+
+#                 bar_colors = [
+#                     "#ef4444" if v == max_load else
+#                     "#22c55e" if v == min_load else "#4facfe"
+#                     for v in ml_df["Load (h)"]
+#                 ]
+
+#                 ml_fig = go.Figure()
+#                 ml_fig.add_trace(go.Bar(
+#                     x=ml_df["Machine"], y=ml_df["Load (h)"],
+#                     marker_color=bar_colors,
+#                     text=[f"{v:.1f}h" for v in ml_df["Load (h)"]],
+#                     textposition="auto",
+#                     hovertemplate="<b>%{x}</b><br>Load: %{y:.2f}h<extra></extra>",
+#                 ))
+#                 # Makespan proxy reference line
+#                 proxy = j_preview.get("makespan_proxy", 0)
+#                 if proxy > 0:
+#                     ml_fig.add_hline(
+#                         y=proxy, line_dash="dash", line_color="#f59e0b",
+#                         annotation_text=f"Makespan proxy C={proxy:.1f}h",
+#                         annotation_position="top right"
+#                     )
+
+#                 ml_fig.update_layout(
+#                     template="plotly_dark", height=400,
+#                     title="Machine Load Hours (joint optimization result)",
+#                     xaxis_title="Machine", yaxis_title="Load (hours)",
+#                     margin=dict(b=100),
+#                 )
+#                 ml_fig.update_xaxes(tickangle=30)
+#                 st.plotly_chart(ml_fig, use_container_width=True)
+
+#                 # Load balance score
+#                 if max_load > 0:
+#                     balance_pct = (1 - (max_load - min_load) / max_load) * 100
+#                     st.markdown(f"""
+#                     <div style='background:#0d1a0d;border:1px solid #1a3a1a;border-radius:6px;
+#                                 padding:10px 16px;margin:8px 0;font-size:13px;color:#9ca3af;'>
+#                     <b style='color:#38ef7d'>Load Balance Score: {balance_pct:.1f}%</b>
+#                     &nbsp; (100% = perfectly balanced, 0% = all load on one machine)<br>
+#                     Bottleneck: <b style='color:#ef4444'>{ml_df.iloc[0]["Machine"]}</b>
+#                     &nbsp;({ml_df.iloc[0]["Load (h)"]:.1f}h) &nbsp;|&nbsp;
+#                     Most idle: <b style='color:#22c55e'>{ml_df.iloc[-1]["Machine"]}</b>
+#                     &nbsp;({ml_df.iloc[-1]["Load (h)"]:.1f}h)
+#                     </div>
+#                     """, unsafe_allow_html=True)
+
+#             # ── Per-product results ────────────────────────────────────────────
+#             if analysis:
+#                 df_j = pd.DataFrame(analysis)
+#                 if "improvement" in df_j.columns:
+#                     df_j["improvement_pct"] = (
+#                         df_j["improvement"]
+#                         .str.replace("%", "", regex=False)
+#                         .astype(float)
+#                     )
+
+#                 jt1, jt2, jt3 = st.tabs([
+#                     "📋 Product Results", "📈 Comparison Charts", "🔍 Source Breakdown"
+#                 ])
+
+#                 with jt1:
+#                     st.markdown("#### Per-Product Joint Optimization Results")
+
+#                     def _color_j(val):
+#                         try:
+#                             v = float(str(val).replace("%", ""))
+#                             if v > 30: return "background:#14532d;color:#86efac"
+#                             if v > 10: return "background:#1a3a0a;color:#bef264"
+#                             if v > 0:  return "background:#1a2a0a;color:#d9f99d"
+#                         except Exception:
+#                             pass
+#                         return ""
+
+#                     display_j = df_j[[
+#                         "item", "description", "demand",
+#                         "old_batch_size", "old_num_batches",
+#                         "new_batch_size", "new_num_batches",
+#                         "ideal_batch_size", "improvement",
+#                         "source",
+#                     ]].copy()
+#                     st.dataframe(
+#                         display_j.style.applymap(_color_j, subset=["improvement"]),
+#                         use_container_width=True, height=480
+#                     )
+#                     st.download_button("📥 Download CSV",
+#                                        data=display_j.to_csv(index=False),
+#                                        file_name="joint_batch_results.csv", mime="text/csv")
+
+#                 with jt2:
+#                     df_top20j = df_j.nlargest(20, "demand")
+
+#                     # Side-by-side batch count comparison
+#                     fc1, fc2 = st.columns(2)
+#                     with fc1:
+#                         fig_jbc = go.Figure()
+#                         fig_jbc.add_trace(go.Bar(name="Old", x=df_top20j["item"].astype(str),
+#                                                   y=df_top20j["old_num_batches"],
+#                                                   marker_color="#4facfe"))
+#                         fig_jbc.add_trace(go.Bar(name="Joint ILP", x=df_top20j["item"].astype(str),
+#                                                   y=df_top20j["new_num_batches"],
+#                                                   marker_color="#38ef7d"))
+#                         fig_jbc.update_layout(barmode="group", template="plotly_dark",
+#                                                height=320, title="Batch Count (top 20)",
+#                                                legend=dict(orientation="h", y=1.1))
+#                         st.plotly_chart(fig_jbc, use_container_width=True)
+
+#                     with fc2:
+#                         fig_jbs = go.Figure()
+#                         fig_jbs.add_trace(go.Scatter(name="Old", x=df_top20j["item"].astype(str),
+#                                                       y=df_top20j["old_batch_size"],
+#                                                       mode="lines+markers",
+#                                                       line=dict(color="#f59e0b")))
+#                         fig_jbs.add_trace(go.Scatter(name="Joint ILP", x=df_top20j["item"].astype(str),
+#                                                       y=df_top20j["new_batch_size"],
+#                                                       mode="lines+markers",
+#                                                       line=dict(color="#38ef7d")))
+#                         fig_jbs.update_layout(template="plotly_dark", height=320,
+#                                                title="Batch Size (top 20)",
+#                                                legend=dict(orientation="h", y=1.1))
+#                         st.plotly_chart(fig_jbs, use_container_width=True)
+
+#                     # Improvement histogram
+#                     if "improvement_pct" in df_j.columns:
+#                         fig_jimp = px.histogram(
+#                             df_j, x="improvement_pct", nbins=20,
+#                             color_discrete_sequence=["#38ef7d"],
+#                             template="plotly_dark",
+#                             title="Joint Improvement Distribution (%)",
+#                             labels={"improvement_pct": "Batch Reduction (%)"}
+#                         )
+#                         fig_jimp.update_layout(height=280)
+#                         st.plotly_chart(fig_jimp, use_container_width=True)
+
+#                 with jt3:
+#                     if "source" in df_j.columns:
+#                         src_counts = df_j["source"].value_counts().reset_index()
+#                         src_counts.columns = ["Source", "Count"]
+
+#                         color_map = {
+#                             "joint_ilp": "#38ef7d",
+#                             "fallback":  "#f59e0b",
+#                             "skipped":   "#6b7280",
+#                         }
+#                         fig_src = px.pie(
+#                             src_counts, values="Count", names="Source",
+#                             color="Source", color_discrete_map=color_map,
+#                             template="plotly_dark",
+#                             title="Decision Source: How was each product's batch size chosen?"
+#                         )
+#                         fig_src.update_layout(height=320)
+#                         st.plotly_chart(fig_src, use_container_width=True)
+
+#                         st.markdown("""
+#                         | Source | Meaning |
+#                         |--------|---------|
+#                         | `joint_ilp` | Solved optimally by the joint MILP |
+#                         | `fallback` | ILP couldn't find optimal; used heuristic |
+#                         | `skipped` | Zero demand — not included in optimization |
+#                         """)
+
+#             # ── Machine load CSV download ──────────────────────────────────────
+#             if machine_loads:
+#                 ml_csv = pd.DataFrame(
+#                     list(machine_loads.items()), columns=["machine", "load_hours"]
+#                 ).sort_values("load_hours", ascending=False)
+#                 st.download_button("📥 Download Machine Loads CSV",
+#                                    data=ml_csv.to_csv(index=False),
+#                                    file_name="joint_machine_loads.csv", mime="text/csv")
 
 
 # ===========================================================================
@@ -3818,422 +3110,422 @@ elif page == "🔍 Bottleneck Analysis":
 # PAGE 7 – Scenario Generation
 # ===========================================================================
 
-elif page == "🎲 Scenario Generation":
-    st.title("🎲 Scenario Generation")
-    st.markdown("""
-    <div style='background:#1a2a3a;border-left:4px solid #a78bfa;
-                padding:14px 18px;border-radius:6px;margin-bottom:18px;'>
-    <b style='color:#a78bfa'>Synthetic Scenario Profiles</b><br>
-    <span style='color:#ccc'>
-    Each profile pre-configures a realistic production scenario with distinct
-    capacity, demand, and routing characteristics. Select a profile, review the
-    parameters, and load it — the data flows directly into the scheduler.
-    </span></div>
-    """, unsafe_allow_html=True)
+# elif page == "🎲 Scenario Generation":
+#     st.title("🎲 Scenario Generation")
+#     st.markdown("""
+#     <div style='background:#1a2a3a;border-left:4px solid #a78bfa;
+#                 padding:14px 18px;border-radius:6px;margin-bottom:18px;'>
+#     <b style='color:#a78bfa'>Synthetic Scenario Profiles</b><br>
+#     <span style='color:#ccc'>
+#     Each profile pre-configures a realistic production scenario with distinct
+#     capacity, demand, and routing characteristics. Select a profile, review the
+#     parameters, and load it — the data flows directly into the scheduler.
+#     </span></div>
+#     """, unsafe_allow_html=True)
 
-    # ── Load profiles (API with fallback) ────────────────────────────────────
-    _profiles_list = _load_scenario_profiles(API_BASE_URL)
+#     # ── Load profiles (API with fallback) ────────────────────────────────────
+#     _profiles_list = _load_scenario_profiles(API_BASE_URL)
 
-    # Build name-keyed dict used throughout the page
-    SCENARIO_PROFILES = {p["name"]: p for p in _profiles_list}
+#     # Build name-keyed dict used throughout the page
+#     SCENARIO_PROFILES = {p["name"]: p for p in _profiles_list}
 
-    # ── Scenario comparison table ─────────────────────────────────────────────
-    with st.expander("📊 Scenario Comparison", expanded=False):
-        _cmp_rows = []
-        for _p in _profiles_list:
-            _par = _p["params"]
-            _exp = _p["expected"]
-            _steps_lbl = (
-                str(_par["steps_per_product"])
-                if _par["steps_per_product"] > 0
-                else "random 3–8"
-            )
-            _cmp_rows.append({
-                "Profile":          f"{_p['icon']} {_p['name']}",
-                "Products":         _par["num_products"],
-                "Machines":         _par["num_machines"],
-                "Demand min":       f"{_par['demand_min']:,}",
-                "Demand max":       f"{_par['demand_max']:,}",
-                "Steps/product":    _steps_lbl,
-                "Avg utilisation":  _exp.get("Avg utilisation", "—"),
-                "Bottleneck risk":  _exp.get("Bottleneck risk",  "—"),
-                "Makespan":         _exp.get("Makespan",          "—"),
-            })
-        st.dataframe(
-            pd.DataFrame(_cmp_rows).set_index("Profile"),
-            use_container_width=True,
-        )
+#     # ── Scenario comparison table ─────────────────────────────────────────────
+#     with st.expander("📊 Scenario Comparison", expanded=False):
+#         _cmp_rows = []
+#         for _p in _profiles_list:
+#             _par = _p["params"]
+#             _exp = _p["expected"]
+#             _steps_lbl = (
+#                 str(_par["steps_per_product"])
+#                 if _par["steps_per_product"] > 0
+#                 else "random 3–8"
+#             )
+#             _cmp_rows.append({
+#                 "Profile":          f"{_p['icon']} {_p['name']}",
+#                 "Products":         _par["num_products"],
+#                 "Machines":         _par["num_machines"],
+#                 "Demand min":       f"{_par['demand_min']:,}",
+#                 "Demand max":       f"{_par['demand_max']:,}",
+#                 "Steps/product":    _steps_lbl,
+#                 "Avg utilisation":  _exp.get("Avg utilisation", "—"),
+#                 "Bottleneck risk":  _exp.get("Bottleneck risk",  "—"),
+#                 "Makespan":         _exp.get("Makespan",          "—"),
+#             })
+#         st.dataframe(
+#             pd.DataFrame(_cmp_rows).set_index("Profile"),
+#             use_container_width=True,
+#         )
 
-    # ── Profile cards ──────────────────────────────────────────────────────────
-    st.markdown("### Select a Scenario Profile")
+#     # ── Profile cards ──────────────────────────────────────────────────────────
+#     st.markdown("### Select a Scenario Profile")
 
-    profile_names = list(SCENARIO_PROFILES.keys())
-    card_cols = st.columns(4)
+#     profile_names = list(SCENARIO_PROFILES.keys())
+#     card_cols = st.columns(4)
 
-    for col, name in zip(card_cols, profile_names):
-        prof = SCENARIO_PROFILES[name]
-        is_selected  = st.session_state.get("scenario_selected") == name
-        border_style = f"3px solid {prof['color']}" if is_selected else "1px solid #2d3748"
-        bg_color     = "#0f1e2e" if is_selected else "#0d1117"
-        with col:
-            st.markdown(f"""
-            <div style='background:{bg_color};border:{border_style};border-radius:10px;
-                        padding:16px;height:210px;position:relative;overflow:hidden;'>
-              <div style='font-size:28px;margin-bottom:6px;'>{prof["icon"]}</div>
-              <div style='font-size:13px;font-weight:700;color:#e5e7eb;margin-bottom:4px;
-                          line-height:1.3;'>{name}</div>
-              <div style='font-size:10px;color:{prof["color"]};margin-bottom:8px;
-                          font-weight:600;'>{prof["subtitle"]}</div>
-              <div style='display:flex;flex-wrap:wrap;gap:4px;'>
-                {"".join(
-                    f'<span style="background:#1f2937;color:#9ca3af;font-size:9px;'
-                    f'padding:2px 6px;border-radius:8px;">{t}</span>'
-                    for t in prof["tags"]
-                )}
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-            if st.button(
-                "Select" if not is_selected else "✓ Selected",
-                key=f"scen_sel_{name}",
-                type="primary" if is_selected else "secondary",
-                use_container_width=True,
-            ):
-                st.session_state.scenario_selected  = name
-                st.session_state.scenario_result    = None
-                st.session_state.scenario_task_id   = None
-                st.session_state.scenario_task_done = True
-                st.rerun()
+#     for col, name in zip(card_cols, profile_names):
+#         prof = SCENARIO_PROFILES[name]
+#         is_selected  = st.session_state.get("scenario_selected") == name
+#         border_style = f"3px solid {prof['color']}" if is_selected else "1px solid #2d3748"
+#         bg_color     = "#0f1e2e" if is_selected else "#0d1117"
+#         with col:
+#             st.markdown(f"""
+#             <div style='background:{bg_color};border:{border_style};border-radius:10px;
+#                         padding:16px;height:210px;position:relative;overflow:hidden;'>
+#               <div style='font-size:28px;margin-bottom:6px;'>{prof["icon"]}</div>
+#               <div style='font-size:13px;font-weight:700;color:#e5e7eb;margin-bottom:4px;
+#                           line-height:1.3;'>{name}</div>
+#               <div style='font-size:10px;color:{prof["color"]};margin-bottom:8px;
+#                           font-weight:600;'>{prof["subtitle"]}</div>
+#               <div style='display:flex;flex-wrap:wrap;gap:4px;'>
+#                 {"".join(
+#                     f'<span style="background:#1f2937;color:#9ca3af;font-size:9px;'
+#                     f'padding:2px 6px;border-radius:8px;">{t}</span>'
+#                     for t in prof["tags"]
+#                 )}
+#               </div>
+#             </div>
+#             """, unsafe_allow_html=True)
+#             if st.button(
+#                 "Select" if not is_selected else "✓ Selected",
+#                 key=f"scen_sel_{name}",
+#                 type="primary" if is_selected else "secondary",
+#                 use_container_width=True,
+#             ):
+#                 st.session_state.scenario_selected  = name
+#                 st.session_state.scenario_result    = None
+#                 st.session_state.scenario_task_id   = None
+#                 st.session_state.scenario_task_done = True
+#                 st.rerun()
 
-    st.markdown("---")
+#     st.markdown("---")
 
-    # ── Profile detail ─────────────────────────────────────────────────────────
-    selected = st.session_state.get("scenario_selected")
+#     # ── Profile detail ─────────────────────────────────────────────────────────
+#     selected = st.session_state.get("scenario_selected")
 
-    if not selected:
-        st.markdown("""
-        <div style='text-align:center;padding:60px 20px;color:#4b5563;'>
-          <div style='font-size:52px;'>🎲</div>
-          <div style='font-size:15px;font-weight:600;color:#6b7280;margin:10px 0;'>
-            No scenario selected
-          </div>
-          <div style='font-size:12px;'>Click a card above to configure and load a scenario.</div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        prof   = SCENARIO_PROFILES[selected]
-        params = prof["params"]
+#     if not selected:
+#         st.markdown("""
+#         <div style='text-align:center;padding:60px 20px;color:#4b5563;'>
+#           <div style='font-size:52px;'>🎲</div>
+#           <div style='font-size:15px;font-weight:600;color:#6b7280;margin:10px 0;'>
+#             No scenario selected
+#           </div>
+#           <div style='font-size:12px;'>Click a card above to configure and load a scenario.</div>
+#         </div>
+#         """, unsafe_allow_html=True)
+#     else:
+#         prof   = SCENARIO_PROFILES[selected]
+#         params = prof["params"]
 
-        dc1, dc2 = st.columns([1, 1])
+#         dc1, dc2 = st.columns([1, 1])
 
-        with dc1:
-            st.markdown(f"#### {prof['icon']} {selected}")
-            st.markdown(
-                f"<p style='color:#9ca3af;font-size:13px;'>{prof['description']}</p>",
-                unsafe_allow_html=True,
-            )
+#         with dc1:
+#             st.markdown(f"#### {prof['icon']} {selected}")
+#             st.markdown(
+#                 f"<p style='color:#9ca3af;font-size:13px;'>{prof['description']}</p>",
+#                 unsafe_allow_html=True,
+#             )
 
-            st.markdown("**Expected outcomes:**")
-            for k, v in prof["expected"].items():
-                st.markdown(
-                    f"<div style='display:flex;justify-content:space-between;"
-                    f"padding:4px 0;border-bottom:1px solid #1f2937;font-size:12px;'>"
-                    f"<span style='color:#9ca3af;'>{k}</span>"
-                    f"<span style='color:#e5e7eb;font-weight:600;'>{v}</span></div>",
-                    unsafe_allow_html=True,
-                )
+#             st.markdown("**Expected outcomes:**")
+#             for k, v in prof["expected"].items():
+#                 st.markdown(
+#                     f"<div style='display:flex;justify-content:space-between;"
+#                     f"padding:4px 0;border-bottom:1px solid #1f2937;font-size:12px;'>"
+#                     f"<span style='color:#9ca3af;'>{k}</span>"
+#                     f"<span style='color:#e5e7eb;font-weight:600;'>{v}</span></div>",
+#                     unsafe_allow_html=True,
+#                 )
 
-            # Demand range preview bar
-            st.markdown("<br>", unsafe_allow_html=True)
-            _dmin = params["demand_min"]
-            _dmax = params["demand_max"]
-            _dmid = int(_dmin + (_dmax - _dmin) * 0.55)
-            st.markdown(
-                f"<div style='font-size:11px;color:#9ca3af;margin-bottom:4px;'>"
-                f"Demand spread: <b style='color:#e5e7eb'>{_dmin:,}</b> → "
-                f"<b style='color:#e5e7eb'>{_dmax:,}</b> units/year"
-                f"&nbsp;&nbsp;(≈ median {_dmid:,})</div>",
-                unsafe_allow_html=True,
-            )
+#             # Demand range preview bar
+#             st.markdown("<br>", unsafe_allow_html=True)
+#             _dmin = params["demand_min"]
+#             _dmax = params["demand_max"]
+#             _dmid = int(_dmin + (_dmax - _dmin) * 0.55)
+#             st.markdown(
+#                 f"<div style='font-size:11px;color:#9ca3af;margin-bottom:4px;'>"
+#                 f"Demand spread: <b style='color:#e5e7eb'>{_dmin:,}</b> → "
+#                 f"<b style='color:#e5e7eb'>{_dmax:,}</b> units/year"
+#                 f"&nbsp;&nbsp;(≈ median {_dmid:,})</div>",
+#                 unsafe_allow_html=True,
+#             )
 
-        with dc2:
-            st.markdown("#### Parameters")
-            _steps_lbl = (
-                params["steps_per_product"]
-                if params["steps_per_product"] > 0
-                else "random 3–8"
-            )
-            param_rows = [
-                ("Products",      params["num_products"]),
-                ("Machines",      params["num_machines"]),
-                ("Demand min",    f"{params['demand_min']:,}"),
-                ("Demand max",    f"{params['demand_max']:,}"),
-                ("Steps/product", _steps_lbl),
-                ("Default seed",  params["seed"]),
-            ]
-            st.markdown(
-                "<div style='background:#111827;border:1px solid #1f2937;border-radius:8px;"
-                "padding:14px 18px;font-size:12px;'>",
-                unsafe_allow_html=True,
-            )
-            for lbl, val in param_rows:
-                st.markdown(
-                    f"<div style='display:flex;justify-content:space-between;"
-                    f"padding:5px 0;border-bottom:1px solid #1f2937;'>"
-                    f"<span style='color:#9ca3af;'>{lbl}</span>"
-                    f"<span style='color:#e5e7eb;font-weight:700;'>{val}</span></div>",
-                    unsafe_allow_html=True,
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
+#         with dc2:
+#             st.markdown("#### Parameters")
+#             _steps_lbl = (
+#                 params["steps_per_product"]
+#                 if params["steps_per_product"] > 0
+#                 else "random 3–8"
+#             )
+#             param_rows = [
+#                 ("Products",      params["num_products"]),
+#                 ("Machines",      params["num_machines"]),
+#                 ("Demand min",    f"{params['demand_min']:,}"),
+#                 ("Demand max",    f"{params['demand_max']:,}"),
+#                 ("Steps/product", _steps_lbl),
+#                 ("Default seed",  params["seed"]),
+#             ]
+#             st.markdown(
+#                 "<div style='background:#111827;border:1px solid #1f2937;border-radius:8px;"
+#                 "padding:14px 18px;font-size:12px;'>",
+#                 unsafe_allow_html=True,
+#             )
+#             for lbl, val in param_rows:
+#                 st.markdown(
+#                     f"<div style='display:flex;justify-content:space-between;"
+#                     f"padding:5px 0;border-bottom:1px solid #1f2937;'>"
+#                     f"<span style='color:#9ca3af;'>{lbl}</span>"
+#                     f"<span style='color:#e5e7eb;font-weight:700;'>{val}</span></div>",
+#                     unsafe_allow_html=True,
+#                 )
+#             st.markdown("</div>", unsafe_allow_html=True)
 
-            custom_seed = st.number_input(
-                "Override seed (optional)",
-                min_value=0, max_value=999_999,
-                value=params["seed"],
-                key="scen_seed_override",
-            )
-            clear_existing = st.checkbox(
-                "Clear existing data before loading",
-                value=True,
-                key="scen_clear_existing",
-            )
-            run_async = st.checkbox(
-                "Run in background (Celery)",
-                value=True,
-                key="scen_async_mode",
-            )
+#             custom_seed = st.number_input(
+#                 "Override seed (optional)",
+#                 min_value=0, max_value=999_999,
+#                 value=params["seed"],
+#                 key="scen_seed_override",
+#             )
+#             clear_existing = st.checkbox(
+#                 "Clear existing data before loading",
+#                 value=True,
+#                 key="scen_clear_existing",
+#             )
+#             run_async = st.checkbox(
+#                 "Run in background (Celery)",
+#                 value=True,
+#                 key="scen_async_mode",
+#             )
 
-        st.markdown("---")
+#         st.markdown("---")
 
-        load_col, sched_col = st.columns([1, 1])
+#         load_col, sched_col = st.columns([1, 1])
 
-        # ── Helper: build API payload for the selected profile ────────────────
-        def _build_scenario_payload(seed_val, clear_val, async_val):
-            payload = {
-                "scenario_profile": selected,
-                "num_products":     int(params["num_products"]),
-                "num_machines":     int(params["num_machines"]),
-                "demand_min":       int(params["demand_min"]),
-                "demand_max":       int(params["demand_max"]),
-                "seed":             int(seed_val),
-                "clear_existing":   str(clear_val).lower(),
-                "async_mode":       str(async_val).lower(),
-            }
-            spp = params["steps_per_product"]
-            if spp and spp > 0:
-                payload["steps_per_product"] = int(spp)
-            return payload
+#         # ── Helper: build API payload for the selected profile ────────────────
+#         def _build_scenario_payload(seed_val, clear_val, async_val):
+#             payload = {
+#                 "scenario_profile": selected,
+#                 "num_products":     int(params["num_products"]),
+#                 "num_machines":     int(params["num_machines"]),
+#                 "demand_min":       int(params["demand_min"]),
+#                 "demand_max":       int(params["demand_max"]),
+#                 "seed":             int(seed_val),
+#                 "clear_existing":   str(clear_val).lower(),
+#                 "async_mode":       str(async_val).lower(),
+#             }
+#             spp = params["steps_per_product"]
+#             if spp and spp > 0:
+#                 payload["steps_per_product"] = int(spp)
+#             return payload
 
-        with load_col:
-            if st.button(
-                f"Load Scenario: {selected}",
-                type="primary",
-                use_container_width=True,
-                key="scen_load_btn",
-            ):
-                payload = _build_scenario_payload(custom_seed, clear_existing, run_async)
-                with st.spinner(f"Loading scenario '{selected}'…"):
-                    try:
-                        r = requests.post(
-                            f"{API_BASE_URL}/initialize-synthetic/",
-                            json=payload,
-                            headers=get_auth_headers(),
-                            timeout=120,
-                        )
-                        if r.status_code == 401:
-                            st.session_state.auth_token = None
-                            st.session_state.username   = None
-                            st.error("Session expired. Please log in again.")
-                            st.rerun()
+#         with load_col:
+#             if st.button(
+#                 f"Load Scenario: {selected}",
+#                 type="primary",
+#                 use_container_width=True,
+#                 key="scen_load_btn",
+#             ):
+#                 payload = _build_scenario_payload(custom_seed, clear_existing, run_async)
+#                 with st.spinner(f"Loading scenario '{selected}'…"):
+#                     try:
+#                         r = requests.post(
+#                             f"{API_BASE_URL}/initialize-synthetic/",
+#                             json=payload,
+#                             headers=get_auth_headers(),
+#                             timeout=120,
+#                         )
+#                         if r.status_code == 401:
+#                             st.session_state.auth_token = None
+#                             st.session_state.username   = None
+#                             st.error("Session expired. Please log in again.")
+#                             st.rerun()
 
-                        if r.status_code in (200, 201, 202):
-                            resp = r.json()
-                            if r.status_code == 202 and resp.get("task_id"):
-                                st.session_state.scenario_task_id   = resp["task_id"]
-                                st.session_state.scenario_task_done = False
-                                st.session_state.scenario_result    = None
-                                st.success(f"Loading started — Task: `{resp['task_id']}`")
-                            else:
-                                st.session_state.scenario_task_id   = None
-                                st.session_state.scenario_task_done = True
-                                st.session_state.scenario_result    = resp
-                                st.success(resp.get("message", "Scenario loaded."))
-                        else:
-                            st.error(f"Error {r.status_code}: {r.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
+#                         if r.status_code in (200, 201, 202):
+#                             resp = r.json()
+#                             if r.status_code == 202 and resp.get("task_id"):
+#                                 st.session_state.scenario_task_id   = resp["task_id"]
+#                                 st.session_state.scenario_task_done = False
+#                                 st.session_state.scenario_result    = None
+#                                 st.success(f"Loading started — Task: `{resp['task_id']}`")
+#                             else:
+#                                 st.session_state.scenario_task_id   = None
+#                                 st.session_state.scenario_task_done = True
+#                                 st.session_state.scenario_result    = resp
+#                                 st.success(resp.get("message", "Scenario loaded."))
+#                         else:
+#                             st.error(f"Error {r.status_code}: {r.text}")
+#                     except Exception as e:
+#                         st.error(f"Connection error: {e}")
 
-        with sched_col:
-            scen_start = st.date_input(
-                "Schedule start date",
-                value=date.today(),
-                key="scen_start_date",
-            )
-            if st.button(
-                "Generate Schedule for this Scenario",
-                type="secondary",
-                use_container_width=True,
-                key="scen_gen_sched_btn",
-            ):
-                sched_payload = {
-                    "start_date":         scen_start.isoformat(),
-                    "schedule_type":      2,
-                    "local_opt_machines": 5,
-                    "clear_existing":     True,
-                    "enable_compaction":  True,
-                    "batch_overrides":    [],
-                    "async_mode":         True,
-                }
-                with st.spinner("Submitting schedule job…"):
-                    try:
-                        r2 = requests.post(
-                            f"{API_BASE_URL}/generate-schedule/",
-                            json=sched_payload,
-                            headers=get_auth_headers(),
-                            timeout=30,
-                        )
-                        if r2.status_code in (200, 201, 202):
-                            t_id = r2.json().get("task_id")
-                            if t_id:
-                                st.session_state.scenario_sched_task_id = t_id
-                                st.session_state.scenario_sched_done    = False
-                                st.success(f"Schedule task submitted — ID: `{t_id}`")
-                                st.info("Check the Schedule Management page to track progress.")
-                        else:
-                            st.error(f"Error {r2.status_code}: {r2.text}")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
+#         with sched_col:
+#             scen_start = st.date_input(
+#                 "Schedule start date",
+#                 value=date.today(),
+#                 key="scen_start_date",
+#             )
+#             if st.button(
+#                 "Generate Schedule for this Scenario",
+#                 type="secondary",
+#                 use_container_width=True,
+#                 key="scen_gen_sched_btn",
+#             ):
+#                 sched_payload = {
+#                     "start_date":         scen_start.isoformat(),
+#                     "schedule_type":      2,
+#                     "local_opt_machines": 5,
+#                     "clear_existing":     True,
+#                     "enable_compaction":  True,
+#                     "batch_overrides":    [],
+#                     "async_mode":         True,
+#                 }
+#                 with st.spinner("Submitting schedule job…"):
+#                     try:
+#                         r2 = requests.post(
+#                             f"{API_BASE_URL}/generate-schedule/",
+#                             json=sched_payload,
+#                             headers=get_auth_headers(),
+#                             timeout=30,
+#                         )
+#                         if r2.status_code in (200, 201, 202):
+#                             t_id = r2.json().get("task_id")
+#                             if t_id:
+#                                 st.session_state.scenario_sched_task_id = t_id
+#                                 st.session_state.scenario_sched_done    = False
+#                                 st.success(f"Schedule task submitted — ID: `{t_id}`")
+#                                 st.info("Check the Schedule Management page to track progress.")
+#                         else:
+#                             st.error(f"Error {r2.status_code}: {r2.text}")
+#                     except Exception as e:
+#                         st.error(f"Connection error: {e}")
 
-        # ── Quick Load + Schedule combined action ─────────────────────────────
-        st.markdown("---")
-        ql_col1, ql_col2 = st.columns([2, 1])
-        with ql_col1:
-            ql_start = st.date_input(
-                "Quick-load start date",
-                value=date.today(),
-                key="scen_ql_start_date",
-            )
-        with ql_col2:
-            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-            if st.button(
-                "⚡ Load + Generate Schedule",
-                type="primary",
-                use_container_width=True,
-                key="scen_ql_btn",
-            ):
-                # Step 1: load data synchronously (async_mode=false for fast scenarios)
-                ql_payload = _build_scenario_payload(custom_seed, clear_existing, False)
-                with st.spinner(f"Loading '{selected}' and generating schedule…"):
-                    try:
-                        r_init = requests.post(
-                            f"{API_BASE_URL}/initialize-synthetic/",
-                            json=ql_payload,
-                            headers=get_auth_headers(),
-                            timeout=120,
-                        )
-                        if r_init.status_code not in (200, 201):
-                            st.error(f"Load failed ({r_init.status_code}): {r_init.text}")
-                            st.stop()
+#         # ── Quick Load + Schedule combined action ─────────────────────────────
+#         st.markdown("---")
+#         ql_col1, ql_col2 = st.columns([2, 1])
+#         with ql_col1:
+#             ql_start = st.date_input(
+#                 "Quick-load start date",
+#                 value=date.today(),
+#                 key="scen_ql_start_date",
+#             )
+#         with ql_col2:
+#             st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+#             if st.button(
+#                 "⚡ Load + Generate Schedule",
+#                 type="primary",
+#                 use_container_width=True,
+#                 key="scen_ql_btn",
+#             ):
+#                 # Step 1: load data synchronously (async_mode=false for fast scenarios)
+#                 ql_payload = _build_scenario_payload(custom_seed, clear_existing, False)
+#                 with st.spinner(f"Loading '{selected}' and generating schedule…"):
+#                     try:
+#                         r_init = requests.post(
+#                             f"{API_BASE_URL}/initialize-synthetic/",
+#                             json=ql_payload,
+#                             headers=get_auth_headers(),
+#                             timeout=120,
+#                         )
+#                         if r_init.status_code not in (200, 201):
+#                             st.error(f"Load failed ({r_init.status_code}): {r_init.text}")
+#                             st.stop()
 
-                        st.session_state.scenario_result    = r_init.json()
-                        st.session_state.scenario_task_done = True
+#                         st.session_state.scenario_result    = r_init.json()
+#                         st.session_state.scenario_task_done = True
 
-                        # Step 2: immediately kick off async schedule generation
-                        r_sched = requests.post(
-                            f"{API_BASE_URL}/generate-schedule/",
-                            json={
-                                "start_date":         ql_start.isoformat(),
-                                "schedule_type":      2,
-                                "local_opt_machines": 5,
-                                "clear_existing":     True,
-                                "enable_compaction":  True,
-                                "batch_overrides":    [],
-                                "async_mode":         True,
-                            },
-                            headers=get_auth_headers(),
-                            timeout=30,
-                        )
-                        if r_sched.status_code in (200, 201, 202):
-                            t_id = r_sched.json().get("task_id")
-                            if t_id:
-                                st.session_state.scenario_sched_task_id = t_id
-                                st.session_state.scenario_sched_done    = False
-                                st.success(
-                                    f"Scenario loaded & schedule running — Task: `{t_id}`. "
-                                    "Check **Schedule Management** to monitor progress."
-                                )
-                            else:
-                                st.success("Scenario loaded. Schedule generation started.")
-                        else:
-                            st.warning(
-                                f"Scenario loaded but schedule failed "
-                                f"({r_sched.status_code}): {r_sched.text}"
-                            )
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
+#                         # Step 2: immediately kick off async schedule generation
+#                         r_sched = requests.post(
+#                             f"{API_BASE_URL}/generate-schedule/",
+#                             json={
+#                                 "start_date":         ql_start.isoformat(),
+#                                 "schedule_type":      2,
+#                                 "local_opt_machines": 5,
+#                                 "clear_existing":     True,
+#                                 "enable_compaction":  True,
+#                                 "batch_overrides":    [],
+#                                 "async_mode":         True,
+#                             },
+#                             headers=get_auth_headers(),
+#                             timeout=30,
+#                         )
+#                         if r_sched.status_code in (200, 201, 202):
+#                             t_id = r_sched.json().get("task_id")
+#                             if t_id:
+#                                 st.session_state.scenario_sched_task_id = t_id
+#                                 st.session_state.scenario_sched_done    = False
+#                                 st.success(
+#                                     f"Scenario loaded & schedule running — Task: `{t_id}`. "
+#                                     "Check **Schedule Management** to monitor progress."
+#                                 )
+#                             else:
+#                                 st.success("Scenario loaded. Schedule generation started.")
+#                         else:
+#                             st.warning(
+#                                 f"Scenario loaded but schedule failed "
+#                                 f"({r_sched.status_code}): {r_sched.text}"
+#                             )
+#                     except Exception as e:
+#                         st.error(f"Connection error: {e}")
 
-        # ── Progress polling ────────────────────────────────────────────────────
-        scen_tid = st.session_state.get("scenario_task_id")
-        if scen_tid and not st.session_state.get("scenario_task_done", True):
-            st.markdown("#### Loading scenario data…")
-            _pb  = st.progress(0)
-            _txt = st.empty()
-            _res = poll_task_until_complete(scen_tid, _pb, _txt, max_wait_seconds=300)
-            if _res:
-                st.session_state.scenario_result    = _res
-                st.session_state.scenario_task_done = True
-                st.session_state.scenario_task_id   = None
-                st.rerun()
+#         # ── Progress polling ────────────────────────────────────────────────────
+#         scen_tid = st.session_state.get("scenario_task_id")
+#         if scen_tid and not st.session_state.get("scenario_task_done", True):
+#             st.markdown("#### Loading scenario data…")
+#             _pb  = st.progress(0)
+#             _txt = st.empty()
+#             _res = poll_task_until_complete(scen_tid, _pb, _txt, max_wait_seconds=300)
+#             if _res:
+#                 st.session_state.scenario_result    = _res
+#                 st.session_state.scenario_task_done = True
+#                 st.session_state.scenario_task_id   = None
+#                 st.rerun()
 
-        # ── Result metrics ──────────────────────────────────────────────────────
-        scen_res = st.session_state.get("scenario_result")
-        if isinstance(scen_res, dict):
-            st.markdown("---")
-            st.markdown("#### Scenario Loaded")
-            rm1, rm2, rm3, rm4 = st.columns(4)
-            rm1.metric("Products created",      scen_res.get("products_created",      "—"))
-            rm2.metric("Machines created",      scen_res.get("machines_created",      "—"))
-            rm3.metric("Process steps created", scen_res.get("process_steps_created", "—"))
-            rm4.markdown(
-                "<div style='padding:10px 0;'>"
-                "<span style='background:#a78bfa;color:#000;padding:4px 10px;"
-                "border-radius:10px;font-size:11px;font-weight:700;'>🧪 Synthetic</span>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-            if scen_res.get("message"):
-                st.success(scen_res["message"])
+#         # ── Result metrics ──────────────────────────────────────────────────────
+#         scen_res = st.session_state.get("scenario_result")
+#         if isinstance(scen_res, dict):
+#             st.markdown("---")
+#             st.markdown("#### Scenario Loaded")
+#             rm1, rm2, rm3, rm4 = st.columns(4)
+#             rm1.metric("Products created",      scen_res.get("products_created",      "—"))
+#             rm2.metric("Machines created",      scen_res.get("machines_created",      "—"))
+#             rm3.metric("Process steps created", scen_res.get("process_steps_created", "—"))
+#             rm4.markdown(
+#                 "<div style='padding:10px 0;'>"
+#                 "<span style='background:#a78bfa;color:#000;padding:4px 10px;"
+#                 "border-radius:10px;font-size:11px;font-weight:700;'>🧪 Synthetic</span>"
+#                 "</div>",
+#                 unsafe_allow_html=True,
+#             )
+#             if scen_res.get("message"):
+#                 st.success(scen_res["message"])
 
-            meta = scen_res.get("metadata", {})
-            if meta:
-                _scen_tag = meta.get("scenario", "")
-                _demand_r = meta.get("demand_range")
-                _hint_parts = []
-                if _scen_tag:
-                    _hint_parts.append(f"Profile: <b>{_scen_tag}</b>")
-                if _demand_r:
-                    _hint_parts.append(
-                        f"Demand range: <b>{_demand_r[0]:,} – {_demand_r[1]:,}</b>"
-                    )
-                if _hint_parts:
-                    st.markdown(
-                        "<div style='font-size:12px;color:#9ca3af;margin-bottom:6px;'>"
-                        + " &nbsp;·&nbsp; ".join(_hint_parts) + "</div>",
-                        unsafe_allow_html=True,
-                    )
-                if meta.get("dataset_type") == "synthetic":
-                    with st.expander("Dataset metadata", expanded=False):
-                        st.json(meta)
+#             meta = scen_res.get("metadata", {})
+#             if meta:
+#                 _scen_tag = meta.get("scenario", "")
+#                 _demand_r = meta.get("demand_range")
+#                 _hint_parts = []
+#                 if _scen_tag:
+#                     _hint_parts.append(f"Profile: <b>{_scen_tag}</b>")
+#                 if _demand_r:
+#                     _hint_parts.append(
+#                         f"Demand range: <b>{_demand_r[0]:,} – {_demand_r[1]:,}</b>"
+#                     )
+#                 if _hint_parts:
+#                     st.markdown(
+#                         "<div style='font-size:12px;color:#9ca3af;margin-bottom:6px;'>"
+#                         + " &nbsp;·&nbsp; ".join(_hint_parts) + "</div>",
+#                         unsafe_allow_html=True,
+#                     )
+#                 if meta.get("dataset_type") == "synthetic":
+#                     with st.expander("Dataset metadata", expanded=False):
+#                         st.json(meta)
 
-            st.markdown("""
-            <div style='background:#0d1f0d;border-left:3px solid #22c55e;
-                        padding:10px 16px;border-radius:6px;font-size:12px;color:#86efac;
-                        margin-top:10px;'>
-            Scenario data loaded. Click <b>Generate Schedule</b> above, use
-            <b>⚡ Load + Generate Schedule</b>, or switch to
-            <b>Schedule Management → Generate Schedule</b> for advanced options.
-            </div>
-            """, unsafe_allow_html=True)
+#             st.markdown("""
+#             <div style='background:#0d1f0d;border-left:3px solid #22c55e;
+#                         padding:10px 16px;border-radius:6px;font-size:12px;color:#86efac;
+#                         margin-top:10px;'>
+#             Scenario data loaded. Click <b>Generate Schedule</b> above, use
+#             <b>⚡ Load + Generate Schedule</b>, or switch to
+#             <b>Schedule Management → Generate Schedule</b> for advanced options.
+#             </div>
+#             """, unsafe_allow_html=True)
 
 
 # ===========================================================================
